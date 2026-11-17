@@ -44,7 +44,7 @@ test('full-canvas plane at z=0 exactly matches the reference frame, including po
   }
 })
 
-test('screen-preserving FOV changes retain projected bounds and leave ground unchanged', () => {
+test('screen-preserving FOV changes retain front-layer projected bounds', () => {
   const layers = initialLayers(defaultSettings)
   const before = structuredClone(layers)
   const next = { ...defaultSettings, fov: 75 }
@@ -53,15 +53,57 @@ test('screen-preserving FOV changes retain projected bounds and leave ground unc
     projectedBounds(next, result[i].transform).forEach((n, j) => close(n, projectedBounds(defaultSettings, layers[i].transform)[j]))
     close(result[i].transform.z, layers[i].transform.z)
   }
-  expect(result[2].transform).toStrictEqual(layers[2].transform)
   expect(layers).toStrictEqual(before)
 })
 
-test('world-preserving FOV changes keep all 3D transforms intact', () => {
+test('world-preserving FOV changes keep front-layer 3D transforms intact', () => {
   const layers = initialLayers(defaultSettings)
   const result = reconfigureScene(defaultSettings, { ...defaultSettings, fov: 65 }, layers, false)
-  expect(result).toStrictEqual(layers)
+  expect(result.slice(0, 2)).toStrictEqual(layers.slice(0, 2))
   expect(result[0].transform).not.toBe(layers[0].transform)
+})
+
+test('FOV changes preserve the projection of ground points in either front-layer mode', () => {
+  const layers = initialLayers(defaultSettings)
+  layers[2].transform.x = 1.25
+  layers[2].transform.y = -1.8
+  const before = structuredClone(layers)
+  const project = (settings, ground) => {
+    const metrics = referenceMetrics(settings)
+    const camera = new PerspectiveCamera(settings.fov, metrics.aspect, metrics.near, 1000)
+    camera.position.z = metrics.cameraZ
+    camera.updateMatrixWorld(true)
+    return [0, 0.25, 0.5, 0.7].flatMap(depth => [-0.5, 0, 0.5].map(side => {
+      const point = new Vector3(ground.x + ground.width * side, ground.y,
+        ground.z + ground.height * (depth - 0.5)).project(camera)
+      return [point.x, point.y]
+    }))
+  }
+  const expected = project(defaultSettings, layers[2].transform)
+  for (const preserveScreen of [true, false]) {
+    for (const fov of [20, 60, 90]) {
+      const next = { ...defaultSettings, fov }
+      const result = reconfigureScene(defaultSettings, next, layers, preserveScreen)
+      const ground = result[2].transform
+      project(next, ground).flat().forEach((value, i) => close(value, expected.flat()[i]))
+      for (const key of ['x', 'y', 'width']) close(ground[key], layers[2].transform[key])
+    }
+  }
+  expect(layers).toStrictEqual(before)
+})
+
+test('repeated FOV changes restore the ground when returning to the initial FOV', () => {
+  const original = initialLayers(defaultSettings)
+  let layers = original
+  let previous = defaultSettings
+  for (const fov of [60, 30, 75, 45]) {
+    const next = { ...defaultSettings, fov }
+    layers = reconfigureScene(previous, next, layers, true)
+    previous = next
+  }
+  for (const key of Object.keys(original[2].transform)) {
+    close(layers[2].transform[key], original[2].transform[key])
+  }
 })
 
 test('resolution changes preserve normalized framing without inflating world geometry', () => {

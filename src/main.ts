@@ -179,7 +179,7 @@ function renderPanel() {
         key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
     const hint = document.createElement('p'); hint.className = 'hint'
-    hint.textContent = '地面はXZ面に水平。FOV変更では移動・拡縮しません。端が見える場合は幅や奥行きを広げてください。'
+    hint.textContent = '地面はXZ面に水平。FOV変更時は見え方を保つよう中心Zと奥行きを調整し、高さ・幅は維持します。'
     panel.append(hint)
   }
 }
