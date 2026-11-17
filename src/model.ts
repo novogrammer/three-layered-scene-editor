@@ -22,6 +22,9 @@ export interface Layer {
 
 export const defaultSettings: SceneSettings = { width: 1920, height: 1080, referenceHeight: 5, fov: 45 }
 
+// Shared by the initial geometry and the demo artwork so their ground boundaries agree.
+export const defaultGroundTransform: Transform = { x: 0, y: -2.5, z: -8, width: 60, height: 40 }
+
 export function referenceMetrics(settings: SceneSettings) {
   const { width, height, referenceHeight, fov } = settings
   if (![width, height, referenceHeight, fov].every(Number.isFinite)
@@ -73,11 +76,11 @@ export function initialLayers(settings: SceneSettings): Layer[] {
   const rect = { x: 0, y: 0, width: settings.width, height: settings.height }
   return [
     { id: 'layer-1', name: 'レイヤー 1', kind: 'front', editorColor: '#78c5b1', visible: true,
-      alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, -12) },
+      alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, -40) },
     { id: 'layer-2', name: 'レイヤー 2', kind: 'front', editorColor: '#efb66d', visible: true,
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, 1) },
     { id: 'ground', name: '地面', kind: 'ground', editorColor: '#9695e4', visible: true,
-      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { x: 0, y: -2.5, z: -8, width: 30, height: 40 } },
+      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform } },
   ]
 }
 

@@ -32,16 +32,17 @@ export function demoImage(kind: 'back' | 'front' | 'ground'): HTMLCanvasElement 
     ctx.fillStyle = '#38766b'
     ctx.beginPath(); ctx.moveTo(1465, 380); ctx.lineTo(1300, 760); ctx.lineTo(1630, 760); ctx.fill()
   } else {
-    ctx.fillStyle = '#a5b7a1'; ctx.fillRect(0, 540, 1920, 540)
-    ctx.fillStyle = '#d2c298'; ctx.fillRect(0, 650, 1920, 430)
-    ctx.strokeStyle = '#b0a27d'; ctx.lineWidth = 3
-    for (let x = 0; x <= 1920; x += 120) {
-      ctx.beginPath(); ctx.moveTo(960 + (x - 960) * 0.25, 650); ctx.lineTo(x, 1080); ctx.stroke()
-    }
-    for (const y of [700, 770, 870, 1010]) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1920, y); ctx.stroke()
-    }
-    ctx.fillStyle = '#d2c298'; ctx.fillRect(0, 1075, 1920, 5)
+    // The image starts at the projected back edge of the finite initial ground.
+    // Keep the source a 2D image; it must not change to follow later 3D edits.
+    const { cameraZ } = referenceMetrics(defaultSettings)
+    const ground = defaultGroundTransform
+    const backZ = ground.z - ground.height / 2
+    const halfViewHeight = (cameraZ - backZ) * Math.tan(defaultSettings.fov * Math.PI / 360)
+    const top = (0.5 - ground.y / (2 * halfViewHeight)) * canvas.height
+    ctx.fillStyle = '#d2c298'
+    ctx.fillRect(0, top, canvas.width, canvas.height - top)
   }
   return canvas
 }
+import { defaultGroundTransform, defaultSettings, referenceMetrics } from './model'
+
