@@ -1,9 +1,8 @@
-import test from 'node:test'
-import assert from 'node:assert/strict'
+import { expect, test } from 'vitest'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { defaultSettings, referenceMetrics, placeFront, frontRect, initialLayers, reconfigureScene } from '../src/model.ts'
 
-const close = (actual, expected, epsilon = 1e-9) => assert.ok(Math.abs(actual - expected) < epsilon, `${actual} != ${expected}`)
+const close = (actual, expected, epsilon = 1e-9) => expect(Math.abs(actual - expected), `${actual} != ${expected}`).toBeLessThan(epsilon)
 function projectedBounds(settings, transform) {
   const metrics = referenceMetrics(settings)
   const camera = new PerspectiveCamera(settings.fov, metrics.aspect, metrics.near, 1000)
@@ -54,36 +53,36 @@ test('screen-preserving FOV changes retain projected bounds and leave ground unc
     projectedBounds(next, result[i].transform).forEach((n, j) => close(n, projectedBounds(defaultSettings, layers[i].transform)[j]))
     close(result[i].transform.z, layers[i].transform.z)
   }
-  assert.deepEqual(result[2].transform, layers[2].transform)
-  assert.deepEqual(layers, before)
+  expect(result[2].transform).toStrictEqual(layers[2].transform)
+  expect(layers).toStrictEqual(before)
 })
 
 test('world-preserving FOV changes keep all 3D transforms intact', () => {
   const layers = initialLayers(defaultSettings)
   const result = reconfigureScene(defaultSettings, { ...defaultSettings, fov: 65 }, layers, false)
-  assert.deepEqual(result, layers)
-  assert.notEqual(result[0].transform, layers[0].transform)
+  expect(result).toStrictEqual(layers)
+  expect(result[0].transform).not.toBe(layers[0].transform)
 })
 
 test('resolution changes preserve normalized framing without inflating world geometry', () => {
   const layers = initialLayers(defaultSettings)
   const next = { ...defaultSettings, width: 3840, height: 2160 }
   const result = reconfigureScene(defaultSettings, next, layers, true)
-  assert.deepEqual(result.map(l => l.transform), layers.map(l => l.transform))
+  expect(result.map(l => l.transform)).toStrictEqual(layers.map(l => l.transform))
 })
 
 test('invalid settings and planes crossing the near plane are rejected without partial edits', () => {
   for (const patch of [{ width: 0 }, { height: NaN }, { referenceHeight: -1 }, { fov: 180 }, { fov: Infinity }]) {
-    assert.throws(() => referenceMetrics({ ...defaultSettings, ...patch }))
+    expect(() => referenceMetrics({ ...defaultSettings, ...patch })).toThrow()
   }
   const rect = { x: 0, y: 0, width: 1920, height: 1080 }
   const metrics = referenceMetrics(defaultSettings)
-  assert.throws(() => placeFront(defaultSettings, rect, metrics.cameraZ))
-  assert.throws(() => placeFront(defaultSettings, rect, metrics.cameraZ - metrics.near / 2))
-  assert.throws(() => placeFront(defaultSettings, { ...rect, width: 0 }, 0))
+  expect(() => placeFront(defaultSettings, rect, metrics.cameraZ)).toThrow()
+  expect(() => placeFront(defaultSettings, rect, metrics.cameraZ - metrics.near / 2)).toThrow()
+  expect(() => placeFront(defaultSettings, { ...rect, width: 0 }, 0)).toThrow()
   const layers = initialLayers(defaultSettings)
   layers[1].transform.z = 3
   const before = structuredClone(layers)
-  assert.throws(() => reconfigureScene(defaultSettings, { ...defaultSettings, fov: 140 }, layers, true))
-  assert.deepEqual(layers, before)
+  expect(() => reconfigureScene(defaultSettings, { ...defaultSettings, fov: 140 }, layers, true)).toThrow()
+  expect(layers).toStrictEqual(before)
 })

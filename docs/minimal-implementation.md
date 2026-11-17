@@ -5,10 +5,11 @@
 ```sh
 npm run dev
 npm test
+npm run test:watch
 npm run build
 ```
 
-テストはNode.jsの組み込みテストランナーを使用する。TypeScriptの直接読み込みに対応したNode.js（22.6以降）が必要。ブラウザー確認はユーザーからの明示的な依頼がある場合のみ行う。
+テストはVitestを使用する。`npm test`で一度実行し、`npm run test:watch`で変更を監視しながら実行できる。ブラウザー確認はユーザーからの明示的な依頼がある場合のみ行う。
 
 ## 操作の流れ
 
