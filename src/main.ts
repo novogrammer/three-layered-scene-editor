@@ -1,5 +1,5 @@
 import './style.css'
-import * as THREE from 'three'
+import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoImage } from './demo'
 import { defaultSettings, frontRect, initialLayers, placeFront, reconfigureScene, referenceMetrics } from './model'
@@ -277,69 +277,86 @@ async function loadImage(file: File, index: number) {
 }
 
 let maxTextureSize = 8192
+let stageObserver: ResizeObserver | undefined
 
-try {
-  editor = new Editor(get('preview'), get('work'), settings, layers, textures)
-  maxTextureSize = editor.maxTextureSize
-  const form = get<HTMLFormElement>('settings-form')
-  const keys = ['width', 'height', 'referenceHeight', 'fov'] as const
-  for (const key of keys) (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key])
-  form.onsubmit = (event) => {
-    event.preventDefault()
-    if (!form.reportValidity()) return
-    const next = Object.fromEntries(keys.map((key) => [key, Number((form.elements.namedItem(key) as HTMLInputElement).value)])) as unknown as SceneSettings
-    try {
-      referenceMetrics(next)
-      const screen = get<HTMLSelectElement>('fov-policy').value === 'screen'
-      const updated = reconfigureScene(settings, next, layers, screen)
-      settings = next; layers = updated
-      sync(); renderPanel()
-      status(`基準設定を適用しました。正面レイヤーは${screen ? '2D配置' : '3D配置'}を維持し、投影を更新しました。`)
-    } catch (error) { status(error instanceof Error ? error.message : '設定を適用できません。', true) }
-  }
-  const offset = (axis: 'x' | 'y') => {
-    const input = get<HTMLInputElement>(`offset-${axis}`)
-    input.oninput = () => {
-      const value = input.valueAsNumber
-      if (axis === 'x') editor.offsetX = value
-      else editor.offsetY = value
-      get(`offset-${axis}-value`).textContent = value.toFixed(2)
-      get('preview-label').textContent = editor.offsetX || editor.offsetY ? '視差確認中 / 編集カメラは固定' : '基準位置'
+// Register before awaiting GPU initialization so HMR cannot leave an old editor alive.
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  alive = false
+  stageObserver?.disconnect()
+  if (editor) void editor.dispose()
+  textures.forEach((texture) => texture.dispose())
+})
+
+async function start() {
+  const inputs = app.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select')
+  inputs.forEach((element) => { element.disabled = true })
+  try {
+    editor = new Editor(get('preview'), get('work'), settings, layers, textures)
+    status('描画エンジンを初期化しています。')
+    await editor.init()
+    if (!alive) return
+    inputs.forEach((element) => { element.disabled = false })
+    maxTextureSize = editor.maxTextureSize
+    const form = get<HTMLFormElement>('settings-form')
+    const keys = ['width', 'height', 'referenceHeight', 'fov'] as const
+    for (const key of keys) (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key])
+    form.onsubmit = (event) => {
+      event.preventDefault()
+      if (!form.reportValidity()) return
+      const next = Object.fromEntries(keys.map((key) => [key, Number((form.elements.namedItem(key) as HTMLInputElement).value)])) as unknown as SceneSettings
+      try {
+        referenceMetrics(next)
+        const screen = get<HTMLSelectElement>('fov-policy').value === 'screen'
+        const updated = reconfigureScene(settings, next, layers, screen)
+        settings = next; layers = updated
+        sync(); renderPanel()
+        status(`基準設定を適用しました。正面レイヤーは${screen ? '2D配置' : '3D配置'}を維持し、投影を更新しました。`)
+      } catch (error) { status(error instanceof Error ? error.message : '設定を適用できません。', true) }
+    }
+    const offset = (axis: 'x' | 'y') => {
+      const input = get<HTMLInputElement>(`offset-${axis}`)
+      input.oninput = () => {
+        const value = input.valueAsNumber
+        if (axis === 'x') editor.offsetX = value
+        else editor.offsetY = value
+        get(`offset-${axis}-value`).textContent = value.toFixed(2)
+        get('preview-label').textContent = editor.offsetX || editor.offsetY ? '視差確認中 / 編集カメラは固定' : '基準位置'
+        editor.requestRender()
+      }
+    }
+    offset('x'); offset('y')
+    get('reset-preview').onclick = () => {
+      for (const axis of ['x', 'y']) {
+        get<HTMLInputElement>(`offset-${axis}`).value = '0'
+        get(`offset-${axis}-value`).textContent = '0.00'
+      }
+      editor.offsetX = editor.offsetY = 0
+      get('preview-label').textContent = '基準位置'
       editor.requestRender()
     }
-  }
-  offset('x'); offset('y')
-  get('reset-preview').onclick = () => {
-    for (const axis of ['x', 'y']) {
-      get<HTMLInputElement>(`offset-${axis}`).value = '0'
-      get(`offset-${axis}-value`).textContent = '0.00'
+    get<HTMLInputElement>('surrounding').onchange = (event) => {
+      editor.surrounding = (event.target as HTMLInputElement).checked
+      get('reference-frame').hidden = !editor.surrounding
+      editor.requestRender()
     }
-    editor.offsetX = editor.offsetY = 0
-    get('preview-label').textContent = '基準位置'
-    editor.requestRender()
+    get<HTMLSelectElement>('diagnostic').onchange = (event) => {
+      editor.diagnostic = Number((event.target as HTMLSelectElement).value)
+      editor.requestRender()
+    }
+    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
+      button.onclick = () => editor.setWorkView(button.dataset.view!)
+    })
+    stageObserver = new ResizeObserver(fitStages)
+    document.querySelectorAll('.image-area').forEach((element) => stageObserver!.observe(element))
+    renderList(); renderPanel(); sync()
+    status('サンプル画像を表示中。各レイヤーの画像を読み込んで試せます。')
+  } catch (error) {
+    if (!alive) return
+    if (editor) await editor.dispose()
+    status(`3D表示を開始できませんでした。WebGPUまたはWebGL 2が利用できる環境で開いてください。${error instanceof Error ? ` ${error.message}` : ''}`, true)
+    app.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select').forEach((element) => { element.disabled = true })
   }
-  get<HTMLInputElement>('surrounding').onchange = (event) => {
-    editor.surrounding = (event.target as HTMLInputElement).checked
-    get('reference-frame').hidden = !editor.surrounding
-    editor.requestRender()
-  }
-  get<HTMLSelectElement>('diagnostic').onchange = (event) => {
-    editor.diagnostic = Number((event.target as HTMLSelectElement).value)
-    editor.requestRender()
-  }
-  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
-    button.onclick = () => editor.setWorkView(button.dataset.view!)
-  })
-  const observer = new ResizeObserver(fitStages)
-  document.querySelectorAll('.image-area').forEach((element) => observer.observe(element))
-  renderList(); renderPanel(); sync()
-  if (import.meta.hot) import.meta.hot.dispose(() => {
-    alive = false
-    observer.disconnect()
-    editor.dispose()
-    textures.forEach((texture) => texture.dispose())
-  })
-} catch (error) {
-  status(`3D表示を開始できませんでした。WebGL 2が利用できる環境で開いてください。${error instanceof Error ? ` ${error.message}` : ''}`, true)
-  app.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select').forEach((element) => { element.disabled = true })
+
 }
+
+void start()

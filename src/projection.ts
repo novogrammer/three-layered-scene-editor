@@ -1,52 +1,41 @@
-import * as THREE from 'three'
+import { Color, MeshBasicNodeMaterial } from 'three/webgpu'
+import type { Matrix4, Texture } from 'three/webgpu'
+import { Fn, If, clamp, float, fract, max, mix, positionWorld, screenCoordinate, step, texture, uniform, vec3, vec4 } from 'three/tsl'
 
-// MeshBasicMaterial retains Three.js's normal color-space/output pipeline.
-// Only map sampling is replaced; projected coordinates are divided per fragment.
-export function projectionMaterial(texture: THREE.Texture, matrix: THREE.Matrix4, color: string) {
+/** Backend-independent projection; the reference matrix uses WebGL's -1..1 clip Z. */
+export function projectionMaterial(image: Texture, matrix: Matrix4, color: string) {
   const uniforms = {
-    projectionFromWorld: { value: matrix },
-    diagnosticMode: { value: 0 },
-    editorColor: { value: new THREE.Color(color) },
+    projectionFromWorld: uniform(matrix),
+    diagnosticMode: uniform(0, 'int'),
+    editorColor: uniform(new Color(color)),
   }
-  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false })
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms)
-    shader.vertexShader = `uniform mat4 projectionFromWorld;
-      varying vec4 vProjected;\n${shader.vertexShader}`.replace(
-      '#include <project_vertex>',
-      `#include <project_vertex>
-      vProjected = projectionFromWorld * modelMatrix * vec4(transformed, 1.0);`,
-    )
-    shader.fragmentShader = `varying vec4 vProjected;
-      uniform int diagnosticMode;
-      uniform vec3 editorColor;\n${shader.fragmentShader}`.replace(
-      '#include <map_fragment>',
-      `bool valid = vProjected.w > 0.0;
-      vec3 ndc = vProjected.xyz / max(vProjected.w, 0.000001);
-      valid = valid && ndc.z >= -1.0 && ndc.z <= 1.0;
-      vec2 projectedUV = ndc.xy * 0.5 + 0.5;
-      bool inside = valid && all(greaterThanEqual(projectedUV, vec2(0.0)))
-        && all(lessThanEqual(projectedUV, vec2(1.0)));
-      if (diagnosticMode == 2) {
-        diffuseColor = vec4(editorColor, 0.65);
-      } else if (!valid) {
-        if (diagnosticMode == 0) discard;
-        diffuseColor = vec4(0.8, 0.12, 0.24, 0.85);
-      } else {
-        vec4 sampleColor = texture2D(map, clamp(projectedUV, vec2(0.0), vec2(1.0)));
-        diffuseColor *= sampleColor;
-        if (diagnosticMode == 1) {
-          if (!inside) {
-            float hatch = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 12.0));
-            diffuseColor = vec4(mix(vec3(0.32, 0.08, 0.14), vec3(1.0, 0.34, 0.18), hatch), 0.85);
-          } else {
-            diffuseColor.rgb = mix(diffuseColor.rgb, editorColor, 0.25);
-            diffuseColor.a = max(diffuseColor.a, 0.35);
-          }
-        }
-      }`,
-    )
-  }
-  material.customProgramCacheKey = () => 'camera-projection-v1'
-  return { material, uniforms }
+  const imageNode = texture(image)
+  const material = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false })
+  material.colorNode = Fn(() => {
+    // positionWorld is interpolated; perspective division happens per fragment.
+    const clip = uniforms.projectionFromWorld.mul(vec4(positionWorld, 1)).toVar()
+    const ndc = clip.xyz.div(max(clip.w, 0.000001)).toVar()
+    const valid = clip.w.greaterThan(0).and(ndc.z.greaterThanEqual(-1)).and(ndc.z.lessThanEqual(1))
+    const projectedUV = ndc.xy.mul(0.5).add(0.5).toVar()
+    const inside = valid.and(projectedUV.x.greaterThanEqual(0)).and(projectedUV.x.lessThanEqual(1))
+      .and(projectedUV.y.greaterThanEqual(0)).and(projectedUV.y.lessThanEqual(1))
+    const sample = imageNode.sample(clamp(projectedUV, 0, 1)).toVar()
+    const result = vec4(sample).toVar()
+
+    If(uniforms.diagnosticMode.equal(2), () => {
+      result.assign(vec4(uniforms.editorColor, 0.65))
+    }).ElseIf(valid.not(), () => {
+      uniforms.diagnosticMode.equal(0).discard()
+      result.assign(vec4(0.8, 0.12, 0.24, 0.85))
+    }).ElseIf(uniforms.diagnosticMode.equal(1), () => {
+      If(inside.not(), () => {
+        const hatch = step(0.5, fract(screenCoordinate.x.add(screenCoordinate.y).div(12)))
+        result.assign(vec4(mix(vec3(0.32, 0.08, 0.14), vec3(1, 0.34, 0.18), hatch), 0.85))
+      }).Else(() => {
+        result.assign(vec4(mix(sample.rgb, uniforms.editorColor, 0.25), max(sample.a, float(0.35))))
+      })
+    })
+    return result
+  })()
+  return { material, uniforms, imageNode }
 }

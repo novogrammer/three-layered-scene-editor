@@ -176,6 +176,8 @@ Planeの四隅に投影UVを設定するだけでは、傾いたPlane上の透�
 
 ## 4. マテリアル（提案）
 
+現在の編集画面はWebGPURendererを使用し、MeshBasicMaterialに相当するMeshBasicNodeMaterialとTSLで投影・補助表示を実装する。GLBへの書き出しでは従来の方針どおり通常UVへベイクし、ノードマテリアルや編集用投影処理に依存させない。
+
 | モード | 編集時の基本設定 | GLB |
 | --- | --- | --- |
 | OPAQUE | MeshBasicMaterial、transparent=false、opacity=1、depthWrite=true | alphaMode=OPAQUE |
@@ -273,6 +275,6 @@ GLB検証ではThree.js GLTFLoaderによる再読み込みに加え、別実装�
 
 ## 9. 現在のリポジトリ
 
-Vite + TypeScript + Three.jsによる段階1の最小検証画面を実装。正面向きレイヤー2枚と地面1枚、投影、配置調整、FOV調整、視差確認、配置確認ビューを備える。FOV調整時の正面レイヤーは2D維持・3D維持を切り替えて比較でき、地面は3D配置を維持する。この検証用の挙動をもって未決定事項の最終仕様を確定するものではない。
+Vite + TypeScript + Three.js（WebGPURenderer）による段階1の最小検証画面を実装。正面向きレイヤー2枚と地面1枚、投影、配置調整、FOV調整、視差確認、配置確認ビューを備える。FOV調整時の正面レイヤーは2D維持・3D維持を切り替えて比較でき、地面は3D配置を維持する。この検証用の挙動をもって未決定事項の最終仕様を確定するものではない。
 
 実装した操作と制限は[最小構成の実装](./minimal-implementation.md)を参照。ブラウザー確認は依頼に従い未実施。JSON保存・GLB出力は未実装。

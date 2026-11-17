@@ -1,17 +1,17 @@
-import * as THREE from 'three'
+import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { projectionMaterial } from './projection'
 import { referenceMetrics } from './model'
 import type { Layer, SceneSettings } from './model'
 
 interface LayerView {
-  mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>
-  outline: THREE.LineLoop
+  mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicNodeMaterial>
+  outline: THREE.LineSegments
   projection: ReturnType<typeof projectionMaterial>
 }
 
 function makeRenderer(canvas: HTMLCanvasElement) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false })
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, alpha: false })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.NoToneMapping
@@ -24,16 +24,17 @@ export class Editor {
   private previewCamera = new THREE.PerspectiveCamera()
   private workCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000)
   private projectionMatrix = new THREE.Matrix4()
-  private previewRenderer: THREE.WebGLRenderer
-  private workRenderer: THREE.WebGLRenderer
+  private previewRenderer: THREE.WebGPURenderer
+  private workRenderer: THREE.WebGPURenderer
   private controls: OrbitControls
   private helpers = new THREE.Group()
   private cameraHelper: THREE.CameraHelper
-  private reference: THREE.LineLoop
+  private reference: THREE.LineSegments
   private views: LayerView[]
   private observer: ResizeObserver
   private frame = 0
   private disposed = false
+  private initialized = false
   private settings: SceneSettings
   private layers: Layer[]
   selected = 0
@@ -50,7 +51,7 @@ export class Editor {
     try {
       this.workRenderer = makeRenderer(workCanvas)
     } catch (error) {
-      this.previewRenderer.dispose()
+      void this.previewRenderer.dispose().catch(() => {})
       throw error
     }
     this.scene.background = new THREE.Color('#17212a')
@@ -86,15 +87,19 @@ export class Editor {
   private makeOutline(color: string) {
     const geometry = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(-0.5, -0.5, 0.001), new THREE.Vector3(0.5, -0.5, 0.001),
+      new THREE.Vector3(0.5, -0.5, 0.001), new THREE.Vector3(0.5, 0.5, 0.001),
       new THREE.Vector3(0.5, 0.5, 0.001), new THREE.Vector3(-0.5, 0.5, 0.001),
+      new THREE.Vector3(-0.5, 0.5, 0.001), new THREE.Vector3(-0.5, -0.5, 0.001),
     ])
-    return new THREE.LineLoop(geometry, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true }))
+    return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true }))
   }
 
   update(settings: SceneSettings, layers: Layer[]) {
     this.settings = settings
     this.layers = layers
     const metrics = referenceMetrics(settings)
+    // Projection UVs deliberately retain the same -1..1 convention on either backend.
+    this.baseCamera.coordinateSystem = THREE.WebGLCoordinateSystem
     this.baseCamera.fov = settings.fov
     this.baseCamera.aspect = metrics.aspect
     this.baseCamera.near = metrics.near
@@ -131,14 +136,35 @@ export class Editor {
     this.requestRender()
   }
 
+  async init() {
+    const results = await Promise.allSettled([this.previewRenderer.init(), this.workRenderer.init()])
+    const failure = results.find((result) => result.status === 'rejected')
+    if (failure?.status === 'rejected') {
+      await this.dispose()
+      throw failure.reason
+    }
+    if (!this.disposed) {
+      this.initialized = true
+      this.requestRender()
+    }
+  }
+
   get maxTextureSize() {
-    return Math.min(this.previewRenderer.capabilities.maxTextureSize, this.workRenderer.capabilities.maxTextureSize)
+    const limit = (renderer: THREE.WebGPURenderer) => {
+      // The backends expose different native limits; access only after init().
+      const backend = renderer.backend as typeof renderer.backend & {
+        device?: { limits: { maxTextureDimension2D: number } }
+        gl?: WebGL2RenderingContext
+      }
+      if (backend.device) return backend.device.limits.maxTextureDimension2D
+      if (backend.gl) return Number(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE))
+      throw new Error('レンダラーのテクスチャ上限を取得できませんでした。')
+    }
+    return Math.min(limit(this.previewRenderer), limit(this.workRenderer))
   }
 
   setTexture(index: number, texture: THREE.Texture) {
-    const material = this.views[index]!.mesh.material
-    material.map = texture
-    material.needsUpdate = true
+    this.views[index]!.projection.imageNode.value = texture
     this.requestRender()
   }
 
@@ -154,10 +180,10 @@ export class Editor {
   }
 
   requestRender = () => {
-    if (!this.frame && !this.disposed) this.frame = requestAnimationFrame(this.render)
+    if (!this.frame && this.initialized && !this.disposed) this.frame = requestAnimationFrame(this.render)
   }
 
-  private fit(renderer: THREE.WebGLRenderer) {
+  private fit(renderer: THREE.WebGPURenderer) {
     const { width, height } = renderer.domElement.getBoundingClientRect()
     const w = Math.max(1, Math.round(width)), h = Math.max(1, Math.round(height))
     const size = renderer.getSize(new THREE.Vector2())
@@ -206,20 +232,20 @@ export class Editor {
     this.workRenderer.render(this.scene, this.workCamera)
   }
 
-  dispose() {
+  async dispose() {
+    if (this.disposed) return
     this.disposed = true
     cancelAnimationFrame(this.frame)
     this.observer.disconnect()
     this.controls.dispose()
     this.cameraHelper.dispose()
     this.scene.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments || object instanceof THREE.LineLoop) {
+      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
         object.geometry.dispose()
         const materials = Array.isArray(object.material) ? object.material : [object.material]
         materials.forEach((material) => material.dispose())
       }
     })
-    this.previewRenderer.dispose()
-    this.workRenderer.dispose()
+    await Promise.allSettled([this.previewRenderer.dispose(), this.workRenderer.dispose()])
   }
 }
