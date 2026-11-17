@@ -1,7 +1,7 @@
 import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
-import { demoImage } from './demo'
+import { demoFiles, loadDemoImages } from './demo'
 import { defaultSettings, frontRect, initialLayers, placeFront, reconfigureScene, referenceMetrics } from './model'
 import type { Layer, SceneSettings } from './model'
 
@@ -13,13 +13,13 @@ let selected = 0
 let depthMode = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
-const images: (HTMLCanvasElement | HTMLImageElement)[] = [demoImage('back'), demoImage('front'), demoImage('ground')]
-const sourceNames = ['サンプル：遠景', 'サンプル：前景', 'サンプル：地面']
+const images: HTMLImageElement[] = []
+const sourceNames: string[] = demoFiles.map((filename) => `samples/${filename}`)
 const uploadVersions = [0, 0, 0]
-const textures = images.map(makeTexture)
+const textures: THREE.Texture[] = []
 let editor: Editor
 
-function makeTexture(image: HTMLCanvasElement | HTMLImageElement) {
+function makeTexture(image: HTMLImageElement) {
   const texture = new THREE.Texture(image)
   texture.colorSpace = THREE.SRGBColorSpace
   texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping
@@ -231,6 +231,11 @@ async function start() {
   const inputs = app.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select')
   inputs.forEach((element) => { element.disabled = true })
   try {
+    status('サンプル画像を読み込んでいます。')
+    const samples = await loadDemoImages()
+    if (!alive) return
+    images.push(...samples)
+    textures.push(...samples.map(makeTexture))
     editor = new Editor(get('preview'), get('work'), settings, layers, textures)
     status('描画エンジンを初期化しています。')
     await editor.init()
@@ -293,7 +298,7 @@ async function start() {
   } catch (error) {
     if (!alive) return
     if (editor) await editor.dispose()
-    status(`3D表示を開始できませんでした。WebGPUまたはWebGL 2が利用できる環境で開いてください。${error instanceof Error ? ` ${error.message}` : ''}`, true)
+    status(`編集画面を開始できませんでした。${error instanceof Error ? ` ${error.message}` : ''}`, true)
     app.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input, button, select').forEach((element) => { element.disabled = true })
   }
 

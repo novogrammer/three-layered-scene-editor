@@ -22,7 +22,7 @@ export interface Layer {
 
 export const defaultSettings: SceneSettings = { width: 1920, height: 1080, referenceHeight: 5, fov: 45 }
 
-// Shared by the initial geometry and the demo artwork so their ground boundaries agree.
+// The static sample ground image was exported to match this initial geometry.
 export const defaultGroundTransform: Transform = { x: 0, y: -2.5, z: -8, width: 60, height: 40 }
 
 export function referenceMetrics(settings: SceneSettings) {
