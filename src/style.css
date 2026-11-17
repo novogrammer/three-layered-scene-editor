@@ -1,3 +1,73 @@
-body {
-  margin: 0;
-}
+:root { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans JP', sans-serif; color: #e3e9ed; background: #10171d; font-synthesis: none; color-scheme: dark; font-size: 13px; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 760px; }
+button, input, select { font: inherit; }
+button, select, input[type=number] { color: #e3e9ed; background: #18242d; border: 1px solid #35434e; border-radius: 5px; padding: 8px 9px; }
+button { cursor: pointer; transition: background .15s, border-color .15s; }
+button:hover { border-color: #8ab9b0; background: #25383e; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #91d8c4; outline-offset: 3px; }
+button.primary { background: #8bcab7; border-color: #8bcab7; color: #112b25; font-weight: 650; }
+button.primary:hover { background: #a6ddcc; }
+.full { width: 100%; }
+.app-header { height: 61px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #151f27; border-bottom: 1px solid #2c3943; }
+.app-header > div { display: flex; align-items: center; gap: 13px; }
+.brand-mark { font-size: 32px; color: #9ed9c6; }
+.app-header strong { font-size: 17px; letter-spacing: -.4px; }
+.badge { font-size: 10px; background: #253a38; color: #abcebf; border-radius: 4px; padding: 4px 7px; }
+.header-note { color: #8296a4; font-size: 11px; letter-spacing: 1px; }
+.workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); align-items: start; }
+.sidebar { background: #151f27; border-right: 1px solid #2c3943; min-height: calc(100vh - 61px); }
+.sidebar section { padding: 20px; border-bottom: 1px solid #2c3943; }
+h2 { margin: 0 0 15px; font-size: 12px; font-weight: 650; letter-spacing: .4px; }
+label { display: block; font-size: 11px; color: #adbdc7; margin-bottom: 12px; line-height: 1.5; }
+label > span { color: #6f8693; font-size: 10px; }
+label input[type=number], label select { display: block; width: 100%; margin-top: 5px; min-width: 0; }
+input[type=number] { font-variant-numeric: tabular-nums; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.readout { color: #b5d2c9; font-size: 10px; line-height: 1.8; font-variant-numeric: tabular-nums; margin: 12px 0 4px; }
+.hint, .sidebar-note { font-size: 10px; line-height: 1.8; color: #8399a8; overflow-wrap: anywhere; }
+.hint { margin: 6px 0 0; }
+.sidebar-note { padding: 4px 20px 20px; }
+.section-heading { display: flex; justify-content: space-between; align-items: baseline; }
+.section-heading > span { color: #748e9d; font-size: 10px; }
+.layer-item { display: flex; width: 100%; align-items: center; gap: 10px; margin-bottom: 7px; text-align: left; padding: 11px 10px; border-color: transparent; background: #1b2933; }
+.layer-item.selected { border-color: #79ad9e; background: #263b3d; }
+.layer-dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; }
+.layer-item small { margin-left: auto; font-size: 10px; color: #93a6b1; }
+.layer-options { display: flex; gap: 20px; align-items: center; margin-top: 16px; }
+.inline-check { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 0; white-space: nowrap; }
+input[type=checkbox] { accent-color: #8bcab7; }
+input[type=color] { width: 30px; height: 25px; padding: 0; border: 0; background: none; cursor: pointer; }
+input[type=file] { display: block; width: 100%; font-size: 10px; margin-top: 6px; color: #8499a8; }
+input::file-selector-button { background: #253741; color: #c8ded6; border: 1px solid #41555d; border-radius: 4px; padding: 6px; margin-right: 5px; cursor: pointer; }
+.layer-options + label { margin-top: 14px; }
+details { margin-top: 12px; border-top: 1px solid #31404a; padding-top: 12px; }
+summary { color: #b0c1ca; font-size: 11px; cursor: pointer; margin-bottom: 12px; }
+main { padding: 25px 28px 15px; min-width: 0; }
+.main-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 10px; }
+h1 { font-size: 20px; letter-spacing: -.5px; margin: 0; font-weight: 600; }
+.main-toolbar p { margin: 6px 0 0; color: #8296a4; font-size: 11px; }
+.comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+.view-card { border: 1px solid #30414c; border-radius: 8px; overflow: hidden; background: #17222b; min-width: 0; }
+.view-heading { min-height: 41px; padding: 9px 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #2c3b45; }
+.view-heading h2 { margin: 0; white-space: nowrap; }
+.view-heading > span { font-size: 9px; color: #8ba0ae; text-align: right; }
+.image-area { height: clamp(170px, 22vw, 350px); display: flex; align-items: center; justify-content: center; background: #0c1319; overflow: hidden; }
+.image-stage { position: relative; flex-shrink: 0; }
+canvas { display: block; width: 100%; height: 100%; }
+#reference-frame { position: absolute; inset: 16.666667%; border: 1px solid #f3e6bd; box-shadow: 0 0 0 2000px #080e1755; pointer-events: none; }
+.parallax-controls { display: flex; align-items: center; gap: 18px; padding: 15px 0 20px; }
+.parallax-controls strong { font-size: 11px; white-space: nowrap; color: #b4c7cf; }
+.parallax-controls label { display: flex; align-items: center; gap: 6px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; }
+input[type=range] { accent-color: #8bcab7; width: 100%; min-width: 40px; }
+output { color: #a7cfc2; font-size: 10px; min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+.parallax-controls button { font-size: 10px; white-space: nowrap; }
+.work-heading { flex-wrap: wrap; }
+.work-actions { display: flex; align-items: center; gap: 5px; }
+.work-actions button, .work-actions select { padding: 5px 8px; font-size: 10px; }
+.work-stage { height: clamp(300px, 38vh, 550px); }
+#work { touch-action: none; }
+.view-footer { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 13px; color: #8196a5; font-size: 9px; border-top: 1px solid #2c3b45; }
+#status { color: #94b0bb; font-size: 11px; min-height: 18px; line-height: 1.7; }
+#status.error { color: #ffc19f; }
+@media (max-width: 1100px) { main { padding: 20px 16px; } .workspace { grid-template-columns: 270px minmax(0, 1fr); } .comparison { grid-template-columns: 1fr; } .image-area { height: 230px; } .parallax-controls { flex-wrap: wrap; gap: 12px; } .parallax-controls strong { width: 100%; } .header-note { display: none; } }
