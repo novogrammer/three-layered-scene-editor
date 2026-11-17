@@ -6,66 +6,6 @@ import { defaultSettings, frontRect, initialLayers, placeFront, reconfigureScene
 import type { Layer, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
-app.innerHTML = `
-  <header class="app-header">
-    <div><span class="brand-mark">▱</span><strong>Layered Scene</strong><span class="badge">最小構成 / 01</span></div>
-    <span class="header-note">Camera Projection · 2.5D</span>
-  </header>
-  <div class="workspace">
-    <aside class="sidebar">
-      <section><h2>基準設定</h2>
-        <form id="settings-form">
-          <div class="pair">
-            <label>2D幅 <span>px</span><input name="width" type="number" min="1" max="16384" step="1" required></label>
-            <label>2D高さ <span>px</span><input name="height" type="number" min="1" max="16384" step="1" required></label>
-          </div>
-          <div class="pair">
-            <label>基準平面の高さ<input name="referenceHeight" type="number" min="0.1" max="100" step="any" required></label>
-            <label>垂直FOV <span>°</span><input name="fov" type="number" min="5" max="140" step="any" required></label>
-          </div>
-          <label>FOV・基準設定変更時の正面レイヤー
-            <select id="fov-policy"><option value="screen">2D配置を保つ</option><option value="world">3D配置を保つ</option></select>
-          </label>
-          <button class="primary full" type="submit">基準設定を適用</button>
-        </form>
-        <p id="camera-info" class="readout"></p>
-        <p class="hint">地面は3D配置を維持。基準カメラは視差確認で変更されません。</p>
-      </section>
-      <section><div class="section-heading"><h2>レイヤー</h2><span>2 + 地面</span></div><div id="layer-list"></div></section>
-      <section id="layer-panel"></section>
-      <p class="sidebar-note">保存・GLB出力は次の段階で実装します。再読み込みすると編集内容は失われます。</p>
-    </aside>
-    <main>
-      <div class="main-toolbar">
-        <div><h1>シーン検証</h1><p>構図を保って、奥行きを探る</p></div>
-        <label class="inline-check"><input id="surrounding" type="checkbox">周囲を表示</label>
-      </div>
-      <div class="comparison">
-        <section class="view-card"><div class="view-heading"><h2>プレビュー</h2><span id="preview-label">基準位置</span></div>
-          <div class="image-area"><div id="preview-stage" class="image-stage"><canvas id="preview"></canvas><div id="reference-frame" hidden></div></div></div>
-        </section>
-        <section class="view-card"><div class="view-heading"><h2>元画像の2D合成</h2><span>レイヤー1 → 地面 → レイヤー2</span></div>
-          <div class="image-area"><div id="source-stage" class="image-stage"><canvas id="source"></canvas></div></div>
-        </section>
-      </div>
-      <section class="parallax-controls">
-        <strong>視差確認</strong>
-        <label>左右 <input id="offset-x" type="range" min="-1" max="1" step="0.01" value="0"><output id="offset-x-value">0.00</output></label>
-        <label>上下 <input id="offset-y" type="range" min="-1" max="1" step="0.01" value="0"><output id="offset-y-value">0.00</output></label>
-        <button id="reset-preview" type="button">基準へ戻す</button>
-      </section>
-      <section class="view-card work-card">
-        <div class="view-heading work-heading"><h2>配置確認</h2>
-          <div class="work-actions"><select id="diagnostic" aria-label="配置確認の表示"><option value="1">投影範囲を確認</option><option value="0">実表示</option><option value="2">レイヤー識別色</option></select>
-          <button type="button" data-view="orbit">斜め</button><button type="button" data-view="side">横</button><button type="button" data-view="top">上</button></div>
-        </div>
-        <div class="work-stage"><canvas id="work"></canvas></div>
-        <div class="view-footer"><span>ドラッグ：回転 / ホイール：拡大縮小 / 右ドラッグ：移動</span><span>橙ハッチ：画面外　赤：投影不可　白枠：基準平面</span></div>
-      </section>
-      <p id="status" role="status" aria-live="polite">サンプル画像を表示中。各レイヤーの画像を読み込んで試せます。</p>
-    </main>
-  </div>`
-
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 let settings = { ...defaultSettings }
 let layers = initialLayers(settings)
