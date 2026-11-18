@@ -15,9 +15,9 @@ export type PlaneOrientation =
 export interface PlacementOrigin { x: number; y: number; z: 0 }
 export interface DepthRange { frontZ: number; backZ: number }
 export const planeDirections: Record<PlaneDirection, string> = {
-  front: '正面', down: '下（地面）', up: '上（天井）', left: '左（壁）', right: '右（壁）',
+  front: '正面', down: '下', up: '上', left: '左', right: '右',
 }
-export const planeRelations = { parallel: '基準面に平行', perpendicular: '基準面に垂直' }
+export const planeRelations = { parallel: '平行', perpendicular: '垂直' }
 
 export function orientationFor(direction: PlaneDirection): PlaneOrientation {
   return direction === 'front' ? { relation: 'parallel', direction } : { relation: 'perpendicular', direction }
