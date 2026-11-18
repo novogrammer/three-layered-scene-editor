@@ -5,6 +5,7 @@ import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
 import { centeredCover } from './image-fit'
+import { reconcileLayerViews } from './layer-views'
 import type { ImageDimensions } from './image-fit'
 import type { Layer, SceneSettings } from './model'
 
@@ -36,23 +37,25 @@ export class Editor {
   private helpers = new THREE.Group()
   private cameraHelper: THREE.CameraHelper
   private reference: THREE.LineSegments
-  private views: LayerView[]
+  private views = new Map<string, LayerView>()
+  private textures: ReadonlyMap<string, THREE.Texture>
   private observer: ResizeObserver
   private frame = 0
   private disposed = false
   private initialized = false
   private settings: SceneSettings
   private layers: Layer[]
-  selected = 0
+  selectedId: string | null = null
   diagnostic = 1
   surrounding = false
   offsetX = 0
   offsetY = 0
 
   constructor(previewCanvas: HTMLCanvasElement, workCanvas: HTMLCanvasElement,
-    settings: SceneSettings, layers: Layer[], textures: THREE.Texture[]) {
+    settings: SceneSettings, layers: Layer[], textures: ReadonlyMap<string, THREE.Texture>) {
     this.settings = settings
     this.layers = layers
+    this.textures = textures
     this.previewRenderer = makeRenderer(previewCanvas)
     try {
       this.workRenderer = makeRenderer(workCanvas)
@@ -69,17 +72,6 @@ export class Editor {
     this.helpers.add(grid)
     this.cameraHelper = new THREE.CameraHelper(this.baseCamera)
     this.helpers.add(this.cameraHelper)
-    this.views = layers.map((layer, index) => {
-      const surface = surfaceMaterial(textures[index]!, this.projectionMatrix, layer.editorColor, usesProjection(layer))
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), surface.material)
-      const outline = this.makeOutline(layer.editorColor)
-      const root = new THREE.Group()
-      const originMarker = new THREE.AxesHelper(0.4)
-      mesh.add(outline)
-      root.add(mesh, originMarker)
-      this.scene.add(root)
-      return { root, originMarker, mesh, outline, surface }
-    })
     this.workCamera.position.set(13, 8, 16)
     this.controls = new OrbitControls(this.workCamera, workCanvas)
     this.controls.target.set(0, -1, -2)
@@ -103,7 +95,35 @@ export class Editor {
     return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true }))
   }
 
-  update(settings: SceneSettings, layers: Layer[]) {
+  private createView(layer: Layer, image: THREE.Texture): LayerView {
+    const surface = surfaceMaterial(image, this.projectionMatrix, layer.editorColor, usesProjection(layer))
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), surface.material)
+    const outline = this.makeOutline(layer.editorColor)
+    const root = new THREE.Group()
+    const originMarker = new THREE.AxesHelper(0.4)
+    mesh.add(outline)
+    root.add(mesh, originMarker)
+    this.scene.add(root)
+    return { root, originMarker, mesh, outline, surface }
+  }
+
+  private disposeView(view: LayerView) {
+    this.scene.remove(view.root)
+    view.root.traverse(object => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+        object.geometry.dispose()
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        materials.forEach(material => material.dispose())
+      }
+    })
+  }
+
+  update(settings: SceneSettings, layers: Layer[], textures: ReadonlyMap<string, THREE.Texture> = this.textures) {
+    for (const layer of layers) if (!textures.has(layer.id)) throw new Error('レイヤーの画像が見つかりません。')
+    this.views = reconcileLayerViews(this.views, layers.map(layer => layer.id),
+      id => this.createView(layers.find(layer => layer.id === id)!, textures.get(id)!), view => this.disposeView(view))
+    this.textures = textures
+
     this.settings = settings
     this.layers = layers
     const metrics = referenceMetrics(settings)
@@ -113,7 +133,7 @@ export class Editor {
     this.baseCamera.aspect = metrics.aspect
     this.baseCamera.near = metrics.near
     // Fit the clip range to the current scene rather than image pixel dimensions.
-    const extent = Math.max(...layers.map(({ transform: t }) =>
+    const extent = Math.max(0, ...layers.map(({ transform: t }) =>
       Math.hypot(t.x, t.y, t.z) + Math.hypot(t.width, t.height)))
     this.baseCamera.far = Math.max(metrics.cameraZ * 2, metrics.cameraZ + extent * 2)
     this.baseCamera.position.set(0, 0, metrics.cameraZ)
@@ -131,10 +151,11 @@ export class Editor {
     this.baseCamera.updateProjectionMatrix()
     this.workCamera.far = Math.max(1000, this.baseCamera.far * 2)
     this.workCamera.updateProjectionMatrix()
-    this.views.forEach((view, i) => {
+    for (const layer of layers) {
+      const view = this.views.get(layer.id)!
       const { root, mesh, outline } = view
-      const layer = layers[i]!
       applyLayerTransform(root, mesh, layer)
+      view.surface.imageNode.value = textures.get(layer.id)!
       const projected = usesProjection(layer)
       if (view.surface.projected !== projected) {
         const image = view.surface.imageNode.value
@@ -148,7 +169,7 @@ export class Editor {
       this.updateImageFit(view.surface)
       view.surface.uniforms.editorColor.value.set(layer.editorColor)
       ;(outline.material as THREE.LineBasicMaterial).color.set(layer.editorColor)
-    })
+    }
     this.requestRender()
   }
 
@@ -177,12 +198,6 @@ export class Editor {
       throw new Error('レンダラーのテクスチャ上限を取得できませんでした。')
     }
     return Math.min(limit(this.previewRenderer), limit(this.workRenderer))
-  }
-
-  setTexture(index: number, texture: THREE.Texture) {
-    this.views[index]!.surface.imageNode.value = texture
-    this.updateImageFit(this.views[index]!.surface)
-    this.requestRender()
   }
 
   private updateImageFit(surface: LayerView['surface']) {
@@ -217,13 +232,14 @@ export class Editor {
 
   private prepareView(work: boolean) {
     this.helpers.visible = work
-    this.views.forEach(({ mesh, outline, originMarker, surface }, i) => {
+    for (const layer of this.layers) {
+      const { mesh, outline, originMarker, surface } = this.views.get(layer.id)!
       const diagnostic = work ? this.diagnostic : 0
       surface.uniforms.diagnosticMode.value = diagnostic
       outline.visible = work
       originMarker.visible = work
-      ;(outline.material as THREE.LineBasicMaterial).opacity = i === this.selected ? 1 : 0.35
-      const transparent = diagnostic !== 0 || this.layers[i]!.alphaMode === 'BLEND'
+      ;(outline.material as THREE.LineBasicMaterial).opacity = layer.id === this.selectedId ? 1 : 0.35
+      const transparent = diagnostic !== 0 || layer.alphaMode === 'BLEND'
       if (mesh.material.transparent !== transparent) {
         mesh.material.transparent = transparent
         mesh.material.needsUpdate = true
@@ -235,7 +251,7 @@ export class Editor {
         mesh.material.side = side
         mesh.material.needsUpdate = true
       }
-    })
+    }
   }
 
   private render = () => {
@@ -263,7 +279,8 @@ export class Editor {
     cancelAnimationFrame(this.frame)
     this.observer.disconnect()
     this.controls.dispose()
-    this.cameraHelper.dispose()
+    this.views.forEach(view => this.disposeView(view))
+    this.views.clear()
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
         object.geometry.dispose()

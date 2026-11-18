@@ -4,6 +4,7 @@ import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
+import { compositionLayers, createLayer, MAX_LAYERS, removeLayer } from './layer-collection'
 import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
@@ -11,14 +12,19 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 let settings = { ...defaultSettings }
 let layers = initialLayers(settings)
-let selected = 0
+let selectedId: string | null = layers[0]?.id ?? null
+let adding = false
 let depthMode = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
-const images: HTMLImageElement[] = []
-const sourceNames: string[] = demoFiles.map((filename) => `samples/${filename}`)
-const uploadVersions = [0, 0, 0]
-const textures: THREE.Texture[] = []
+interface LayerAsset { image: HTMLImageElement; texture: THREE.Texture; name: string }
+const assets = new Map<string, LayerAsset>()
+const imageRequests = new Map<string, symbol>()
+const textureMap = () => new Map([...assets].map(([id, asset]) => [id, asset.texture]))
+
+function replaceLayer(updated: Layer) {
+  layers = layers.map(layer => layer.id === updated.id ? updated : layer)
+}
 let editor: Editor
 
 function makeTexture(image: HTMLImageElement) {
@@ -46,9 +52,9 @@ function compare() {
   const ctx = source.getContext('2d')!
   ctx.fillStyle = '#17212a'
   ctx.fillRect(0, 0, source.width, source.height)
-  for (const index of [0, 2, 1]) {
-    if (!layers[index]!.visible) continue
-    const image = images[index]!
+  for (const layer of compositionLayers(layers)) {
+    if (!layer.visible) continue
+    const image = assets.get(layer.id)!.image
     const crop = centeredCover({ width: image.naturalWidth, height: image.naturalHeight }, settings).source
     ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, source.width, source.height)
   }
@@ -67,7 +73,8 @@ function fitStages() {
 }
 
 function sync() {
-  editor.update(settings, layers)
+  editor.selectedId = selectedId
+  editor.update(settings, layers, textureMap())
   const metrics = referenceMetrics(settings)
   get('camera-info').textContent = `基準平面 ${metrics.width.toFixed(3)} × ${metrics.height.toFixed(3)} / カメラZ +${metrics.cameraZ.toFixed(3)}`
   const warning = layers.some((layer) => layer.transform.z >= metrics.cameraZ - metrics.near)
@@ -79,11 +86,11 @@ function sync() {
 function renderList() {
   const list = get('layer-list')
   list.replaceChildren()
-  layers.forEach((layer, index) => {
+  layers.forEach((layer) => {
     const button = document.createElement('button')
     button.type = 'button'
-    button.className = `layer-item ${index === selected ? 'selected' : ''}`
-    button.setAttribute('aria-pressed', String(index === selected))
+    button.className = `layer-item ${layer.id === selectedId ? 'selected' : ''}`
+    button.setAttribute('aria-pressed', String(layer.id === selectedId))
     const dot = document.createElement('span')
     dot.className = 'layer-dot'
     dot.style.background = layer.editorColor
@@ -93,14 +100,15 @@ function renderList() {
     detail.textContent = layer.visible ? planeDirections[layer.orientation.direction] : '非表示'
     button.append(dot, name, detail)
     button.onclick = () => {
-      selected = index
-      editor.selected = index
+      selectedId = layer.id
+      editor.selectedId = layer.id
       renderList()
       renderPanel()
       editor.requestRender()
     }
     list.append(button)
   })
+  updateAddButton()
 }
 
 function numberField(parent: HTMLElement, label: string, value: number, onChange: (value: number) => void,
@@ -128,13 +136,20 @@ function numberField(parent: HTMLElement, label: string, value: number, onChange
 }
 
 function renderPanel() {
-  const layer = layers[selected]!
+  const layer = layers.find(layer => layer.id === selectedId)
   const panel = get('layer-panel')
   panel.replaceChildren()
-  const title = document.createElement('h2'); title.textContent = layer.name; panel.append(title)
+  panel.hidden = !layer
+  if (!layer) return
+  const asset = assets.get(layer.id)!
+  const heading = document.createElement('div'); heading.className = 'panel-heading'
+  const deleteButton = document.createElement('button'); deleteButton.type = 'button'; deleteButton.textContent = '削除'
+  deleteButton.onclick = () => deleteLayer(layer.id)
+  const title = document.createElement('h2'); title.textContent = layer.name
+  heading.append(title, deleteButton); panel.append(heading)
   const change = (direction: PlaneDirection) => {
     try {
-      layers[selected] = changeOrientation(settings, layer, orientationFor(direction))
+      replaceLayer(changeOrientation(settings, layer, orientationFor(direction)))
       sync(); renderList(); renderPanel()
       status('')
     } catch (error) {
@@ -167,9 +182,9 @@ function renderPanel() {
   const fileLabel = document.createElement('label'); fileLabel.textContent = '画像'
   const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'; input.title = 'PNG / JPEG / WebP、32MB以下'
   fileLabel.append(input); panel.append(fileLabel)
-  const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = sourceNames[selected]!
+  const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = asset.name
   panel.append(fileInfo)
-  const image = images[selected]!
+  const image = asset.image
   const aspectMessage = imageAspectNotice({ width: image.naturalWidth, height: image.naturalHeight }, settings)
   if (aspectMessage) {
     const notice = document.createElement('p')
@@ -180,8 +195,7 @@ function renderPanel() {
     input.setAttribute('aria-describedby', notice.id)
     panel.append(notice)
   }
-  const index = selected
-  input.onchange = () => { const file = input.files?.[0]; if (file) void loadImage(file, index) }
+  input.onchange = () => { const file = input.files?.[0]; if (file) void loadImage(file, layer.id) }
   const row = document.createElement('div'); row.className = 'layer-options'
   const visibleLabel = document.createElement('label'); visibleLabel.className = 'inline-check'
   const visible = document.createElement('input'); visible.type = 'checkbox'; visible.checked = layer.visible
@@ -232,10 +246,10 @@ function renderPanel() {
     }
     const range = layer.depthRange!
     numberField(grid, '手前端Z', range.frontZ, (value) => {
-      layers[selected] = setDepthRange(layer, value, range.backZ)
+      replaceLayer(setDepthRange(layer, value, range.backZ))
     }, -1000, 1000)
     numberField(grid, '奥端Z', range.backZ, (value) => {
-      layers[selected] = setDepthRange(layer, range.frontZ, value)
+      replaceLayer(setDepthRange(layer, range.frontZ, value))
     }, -1000, 1000)
 
   }
@@ -244,40 +258,88 @@ function renderPanel() {
   const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
   for (const key of ['x', 'y'] as const) {
     const originInput = numberField(originFields, key.toUpperCase(), layer.origin[key], (value) => {
-      layers[selected] = moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y)
+      replaceLayer(moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y))
     }, -500, 500)
     originInput.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()}`)
   }
 
 }
 
-async function loadImage(file: File, index: number) {
-  const version = ++uploadVersions[index]!
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-    status('PNG・JPEG・WebPの画像を選んでください。', true); return
-  }
-  if (file.size > 32 * 1024 * 1024) { status('画像は32MB以下にしてください。', true); return }
+function updateAddButton() {
+  const button = get<HTMLButtonElement>('add-layer')
+  button.disabled = adding || layers.length >= MAX_LAYERS
+  button.title = layers.length >= MAX_LAYERS ? `最大${MAX_LAYERS}枚です` : '画像からレイヤーを追加'
+}
+
+async function decodeImage(file: File) {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('PNG・JPEG・WebPの画像を選んでください。')
+  if (file.size > 32 * 1024 * 1024) throw new Error('画像は32MB以下にしてください。')
   const url = URL.createObjectURL(file)
   try {
     const image = new Image()
     image.src = url
     await image.decode()
-    if (!alive || version !== uploadVersions[index]) return
     const maxSize = Math.min(8192, maxTextureSize)
     if (image.width > maxSize || image.height > maxSize) throw new Error(`画像の各辺は${maxSize}px以下にしてください。`)
+    return image
+  } finally { URL.revokeObjectURL(url) }
+}
+
+async function addImageLayer(file: File) {
+  if (adding) return
+  if (layers.length >= MAX_LAYERS) { status(`レイヤーは${MAX_LAYERS}枚まで追加できます。`, true); return }
+  adding = true
+  updateAddButton()
+  status('画像を読み込み中…')
+  try {
+    const image = await decodeImage(file)
+    if (!alive) return
+    const layer = createLayer(settings, layers, crypto.randomUUID(), file.name.replace(/\.[^.]+$/, '') || file.name)
     const texture = makeTexture(image)
-    const previous = textures[index]!
-    textures[index] = texture
-    images[index] = image
-    sourceNames[index] = `${file.name} / ${image.width} × ${image.height}`
-    editor.setTexture(index, texture)
-    previous.dispose()
+    assets.set(layer.id, { image, texture, name: `${file.name} / ${image.width} × ${image.height}` })
+    layers = [...layers, layer]
+    selectedId = layer.id
+    sync(); renderList(); renderPanel()
+    status('レイヤーを追加しました。')
+  } catch (error) {
+    if (alive) status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
+  } finally {
+    adding = false
+    if (alive) updateAddButton()
+  }
+}
+
+function deleteLayer(id: string) {
+  const asset = assets.get(id)
+  const result = removeLayer(layers, id, selectedId)
+  layers = result.layers; selectedId = result.selectedId
+  imageRequests.delete(id)
+  assets.delete(id)
+  // Remove GPU views before releasing the texture they referenced.
+  sync()
+  asset?.texture.dispose()
+  renderList(); renderPanel()
+  status('')
+}
+
+async function loadImage(file: File, id: string) {
+  const request = Symbol()
+  imageRequests.set(id, request)
+  try {
+    const image = await decodeImage(file)
+    if (!alive || imageRequests.get(id) !== request || !assets.has(id)) return
+    const texture = makeTexture(image)
+    const previous = assets.get(id)!
+    assets.set(id, { image, texture, name: `${file.name} / ${image.width} × ${image.height}` })
     sync()
-    if (selected === index) renderPanel()
+    previous.texture.dispose()
+    if (selectedId === id) renderPanel()
     status('画像を読み込みました。')
   } catch (error) {
-    if (alive && version === uploadVersions[index]) status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
-  } finally { URL.revokeObjectURL(url) }
+    if (alive && imageRequests.get(id) === request && assets.has(id)) {
+      status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
+    }
+  }
 }
 
 let maxTextureSize = 8192
@@ -288,7 +350,9 @@ if (import.meta.hot) import.meta.hot.dispose(() => {
   alive = false
   stageObserver?.disconnect()
   if (editor) void editor.dispose()
-  textures.forEach((texture) => texture.dispose())
+  assets.forEach(asset => asset.texture.dispose())
+  assets.clear()
+  imageRequests.clear()
 })
 
 async function start() {
@@ -298,14 +362,19 @@ async function start() {
     status('画像を読み込み中…')
     const samples = await loadDemoImages()
     if (!alive) return
-    images.push(...samples)
-    textures.push(...samples.map(makeTexture))
-    editor = new Editor(get('preview'), get('work'), settings, layers, textures)
+    layers.forEach((layer, index) => {
+      const image = samples[index]!
+      assets.set(layer.id, { image, texture: makeTexture(image), name: `samples/${demoFiles[index]}` })
+    })
+    editor = new Editor(get('preview'), get('work'), settings, layers, textureMap())
     status('初期化中…')
     await editor.init()
     if (!alive) return
     inputs.forEach((element) => { element.disabled = false })
     maxTextureSize = editor.maxTextureSize
+    const addInput = get<HTMLInputElement>('add-layer-image')
+    get('add-layer').onclick = () => { addInput.value = ''; addInput.click() }
+    addInput.onchange = () => { const file = addInput.files?.[0]; if (file) void addImageLayer(file) }
     const form = get<HTMLFormElement>('settings-form')
     const keys = ['width', 'height', 'referenceHeight', 'fov'] as const
     for (const key of keys) (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key])

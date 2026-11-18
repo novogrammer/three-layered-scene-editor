@@ -33,7 +33,11 @@
             </form>
             <details class="camera-details"><summary>カメラ情報</summary><p id="camera-info" class="readout"></p></details>
           </section>
-          <section><h2>レイヤー</h2><div id="layer-list"></div></section>
+          <section>
+            <div class="panel-heading"><h2>レイヤー</h2><button id="add-layer" type="button">追加</button></div>
+            <input id="add-layer-image" type="file" accept="image/png,image/jpeg,image/webp" aria-label="追加する画像" hidden>
+            <div id="layer-list"></div>
+          </section>
           <section id="layer-panel"></section>
           <p class="sidebar-note" title="保存機能は未実装です。再読み込みすると編集内容が失われます。">編集内容は保存されません</p>
         </aside>
@@ -61,7 +65,7 @@
             <section class="view-card"><div class="view-heading"><h2>プレビュー</h2><span id="preview-label" hidden>視差確認中</span></div>
               <div class="image-area"><div id="preview-stage" class="image-stage"><canvas id="preview" aria-label="基準カメラと視差確認のプレビュー"></canvas><div id="reference-frame" hidden></div></div></div>
             </section>
-            <section class="view-card"><div class="view-heading"><h2 title="入力画像をレイヤー1・地面・レイヤー2の順で合成">元画像</h2></div>
+            <section class="view-card"><div class="view-heading"><h2 title="入力画像をZ位置に合わせて奥から手前へ2D合成します。">元画像</h2></div>
               <div class="image-area"><div id="source-stage" class="image-stage"><canvas id="source" aria-label="入力レイヤーの2D合成画像"></canvas></div></div>
             </section>
           </div>

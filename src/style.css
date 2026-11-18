@@ -77,3 +77,11 @@ output { color: #a7cfc2; font-size: 10px; min-width: 32px; text-align: right; fo
 .help-content h2:first-child { margin-top: 0; }
 .help-content p { margin: 6px 0; font-size: 11px; line-height: 1.8; color: #adbdc7; }
 #status:empty { display: none; }
+
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 15px; }
+.panel-heading h2 { margin: 0; overflow-wrap: anywhere; }
+.panel-heading button { flex-shrink: 0; padding: 5px 9px; font-size: 11px; }
+button:disabled { opacity: .45; cursor: default; }
+.layer-item > span:not(.layer-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-item small { flex-shrink: 0; }
+input[type=file][hidden] { display: none; }
