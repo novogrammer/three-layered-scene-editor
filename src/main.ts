@@ -4,7 +4,7 @@ import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
-import { compositionLayers, createLayer, MAX_LAYERS, removeLayer } from './layer-collection'
+import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
 import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
@@ -147,6 +147,18 @@ function renderPanel() {
   deleteButton.onclick = () => deleteLayer(layer.id)
   const title = document.createElement('h2'); title.textContent = layer.name
   heading.append(title, deleteButton); panel.append(heading)
+  const orderControls = document.createElement('div'); orderControls.className = 'layer-order'
+  const index = layers.findIndex(item => item.id === layer.id)
+  for (const [offset, label] of [[-1, '上へ'], [1, '下へ']] as const) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label
+    button.disabled = offset === -1 ? index === 0 : index === layers.length - 1
+    button.onclick = () => {
+      layers = moveLayer(layers, layer.id, offset)
+      sync(); renderList(); renderPanel()
+    }
+    orderControls.append(button)
+  }
+  panel.append(orderControls)
   const change = (direction: PlaneDirection) => {
     try {
       replaceLayer(changeOrientation(settings, layer, orientationFor(direction)))

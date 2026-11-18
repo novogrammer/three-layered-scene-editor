@@ -29,3 +29,12 @@ export function removeLayer(layers: Layer[], id: string, selectedId: string | nu
 export function compositionLayers(layers: readonly Layer[]): Layer[] {
   return [...layers].sort((a, b) => a.transform.z - b.transform.z)
 }
+
+export function moveLayer(layers: readonly Layer[], id: string, offset: -1 | 1): Layer[] {
+  const result = [...layers]
+  const index = result.findIndex(layer => layer.id === id)
+  const target = index + offset
+  if (index < 0 || target < 0 || target >= result.length) return result
+  ;[result[index], result[target]] = [result[target]!, result[index]!]
+  return result
+}

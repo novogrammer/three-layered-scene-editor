@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { PerspectiveCamera, Vector3 } from 'three/webgpu'
-import { compositionLayers, createLayer, MAX_LAYERS, removeLayer } from '../src/layer-collection.ts'
+import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from '../src/layer-collection.ts'
 import { defaultSettings, initialLayers, referenceMetrics } from '../src/model.ts'
 
 test('new image layers start at the reference frame and preserve the existing collection', () => {
@@ -72,4 +72,24 @@ test('comparison keeps list order when Z positions are equal', () => {
   const layers = initialLayers(defaultSettings)
   layers.forEach(layer => { layer.transform.z = 0 })
   expect(compositionLayers(layers).map(layer => layer.id)).toEqual(layers.map(layer => layer.id))
+})
+
+test('moving a layer changes only list order and preserves layer identity and transforms', () => {
+  const layers = initialLayers(defaultSettings), before = structuredClone(layers)
+  const moved = moveLayer(layers, layers[1].id, -1)
+  expect(moved).toEqual([layers[1], layers[0], layers[2]])
+  expect(moved[0]).toBe(layers[1])
+  expect(moveLayer(moved, layers[1].id, 1)).toEqual(layers)
+  expect(layers).toEqual(before)
+  expect(compositionLayers(moved)).toEqual(compositionLayers(layers))
+  layers.forEach(layer => { layer.transform.z = 0 })
+  expect(compositionLayers(moved)).toEqual(moved)
+})
+
+test('moving beyond list boundaries or moving an unknown layer does nothing', () => {
+  const layers = initialLayers(defaultSettings)
+  expect(moveLayer(layers, layers[0].id, -1)).toEqual(layers)
+  expect(moveLayer(layers, layers.at(-1).id, 1)).toEqual(layers)
+  expect(moveLayer(layers, 'missing', 1)).toEqual(layers)
+  expect(moveLayer([], 'missing', -1)).toEqual([])
 })

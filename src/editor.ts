@@ -6,6 +6,7 @@ import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
 import { centeredCover } from './image-fit'
 import { reconcileLayerViews } from './layer-views'
+import { layerRenderSort } from './render-order'
 import type { ImageDimensions } from './image-fit'
 import type { Layer, SceneSettings } from './model'
 
@@ -22,6 +23,8 @@ function makeRenderer(canvas: HTMLCanvasElement) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.NoToneMapping
+  renderer.setOpaqueSort(layerRenderSort(false))
+  renderer.setTransparentSort(layerRenderSort(true))
   return renderer
 }
 
@@ -151,9 +154,10 @@ export class Editor {
     this.baseCamera.updateProjectionMatrix()
     this.workCamera.far = Math.max(1000, this.baseCamera.far * 2)
     this.workCamera.updateProjectionMatrix()
-    for (const layer of layers) {
+    for (const [index, layer] of layers.entries()) {
       const view = this.views.get(layer.id)!
       const { root, mesh, outline } = view
+      mesh.userData.layerListIndex = index
       applyLayerTransform(root, mesh, layer)
       view.surface.imageNode.value = textures.get(layer.id)!
       const projected = usesProjection(layer)
