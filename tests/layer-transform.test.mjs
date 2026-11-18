@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
-import { Group, Object3D, Vector3 } from 'three/webgpu'
+import { Group, Object3D, PerspectiveCamera, Vector3 } from 'three/webgpu'
 import { applyLayerTransform } from '../src/layer-transform.ts'
-import { changePreset, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene } from '../src/model.ts'
+import { changePreset, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics } from '../src/model.ts'
 
 function closeVector(actual, expected) {
   actual.toArray().forEach((value, i) => expect(value).toBeCloseTo(expected[i], 10))
@@ -73,4 +73,45 @@ test('FOV correction leaves the placement origin on z=0 and scales the ground of
   expect(updated[2].origin).not.toBe(layers[2].origin)
   const { root } = objects(updated[2])
   expect(root.getWorldPosition(new Vector3()).z).toBe(0)
+})
+
+test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its projected surface and placement origin through FOV changes', (preset) => {
+  let layer = changePreset(defaultSettings, initialLayers(defaultSettings)[2], preset)
+  layer = moveOrigin(layer, layer.origin.x + 0.8, layer.origin.y - 0.3)
+  layer.transform = { ...layer.transform, z: -9, width: 11, height: 7 }
+  const original = structuredClone(layer)
+  const project = (settings, surface) => {
+    const camera = new PerspectiveCamera(settings.fov, settings.width / settings.height, 0.01, 1000)
+    camera.position.z = referenceMetrics(settings).cameraZ
+    camera.updateMatrixWorld(true)
+    const { plane } = objects(surface)
+    return [-0.5, 0, 0.5].flatMap(x => [-0.5, 0, 0.5].map(y =>
+      new Vector3(x, y, 0).applyMatrix4(plane.matrixWorld).project(camera)))
+  }
+  const expected = project(defaultSettings, layer)
+  const crossSection = preset === 'left-wall' || preset === 'right-wall' ? 'height' : 'width'
+  for (const preserveScreen of [true, false]) {
+    for (const fov of [20, 60, 90]) {
+      const next = { ...defaultSettings, fov }
+      const [updated] = reconfigureScene(defaultSettings, next, [layer], preserveScreen)
+      project(next, updated).forEach((point, i) => {
+        expect(point.x).toBeCloseTo(expected[i].x, 10)
+        expect(point.y).toBeCloseTo(expected[i].y, 10)
+      })
+      expect(updated.origin).toEqual(layer.origin)
+      expect(updated.origin.z).toBe(0)
+      for (const key of ['x', 'y', crossSection]) expect(updated.transform[key]).toBe(layer.transform[key])
+    }
+  }
+  let current = layer
+  let previous = defaultSettings
+  for (const fov of [60, 30, 75, 45]) {
+    const next = { ...defaultSettings, fov }
+    ;[current] = reconfigureScene(previous, next, [current], true)
+    previous = next
+  }
+  for (const key of Object.keys(layer.transform)) expect(current.transform[key]).toBeCloseTo(layer.transform[key], 10)
+  expect(layer).toEqual(original)
+  const [resolutionOnly] = reconfigureScene(defaultSettings, { ...defaultSettings, width: 3840, height: 2160 }, [layer], true)
+  expect(resolutionOnly.transform).toEqual(layer.transform)
 })

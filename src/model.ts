@@ -141,13 +141,15 @@ export function initialLayers(settings: SceneSettings): Layer[] {
 export function reconfigureScene(previous: SceneSettings, next: SceneSettings, layers: Layer[], preserveScreen: boolean): Layer[] {
   const metrics = referenceMetrics(next)
   // Compensate the FOV change only; reference-height changes remain independent.
-  const groundDepthScale = Math.tan(previous.fov * Math.PI / 360) / Math.tan(next.fov * Math.PI / 360)
+  const depthScale = Math.tan(previous.fov * Math.PI / 360) / Math.tan(next.fov * Math.PI / 360)
   return layers.map((layer) => {
     let transform = { ...layer.transform }
     let rect = { ...layer.rect }
-    if (layer.kind === 'ground') {
-      transform.z *= groundDepthScale
-      transform.height *= groundDepthScale
+    if (layer.kind !== 'front') {
+      transform.z *= depthScale
+      // Wall depth follows the plane's local X; floor/ceiling depth follows local Y.
+      if (layer.kind === 'left-wall' || layer.kind === 'right-wall') transform.width *= depthScale
+      else transform.height *= depthScale
     }
     if (layer.kind === 'front' && preserveScreen) {
       const old = frontRect(previous, layer.transform)

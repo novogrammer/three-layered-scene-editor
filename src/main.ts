@@ -201,9 +201,9 @@ function renderPanel() {
         key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
     const hint = document.createElement('p'); hint.className = 'hint'
-    hint.textContent = layer.kind === 'ground'
-      ? 'FOV変更時は中心Zと奥行きを調整します。高さは下の配置基準点Yで指定します。'
-      : '面の位置は配置基準点で指定します。壁・天井のFOV追従は未決定のため、現在は3D配置を維持します。'
+    hint.textContent = wall
+      ? 'FOV変更時は中心Zと奥行きを調整し、左右位置・高さは維持します。面の位置は配置基準点で指定します。'
+      : 'FOV変更時は中心Zと奥行きを調整し、高さ・幅は維持します。面の高さは配置基準点Yで指定します。'
     panel.append(hint)
   }
   const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点（Z = 0）'
