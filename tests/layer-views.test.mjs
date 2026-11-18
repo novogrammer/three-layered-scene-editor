@@ -31,3 +31,50 @@ test('duplicate IDs are rejected before allocating or disposing resources', () =
   expect(() => reconcileLayerViews(new Map(), ['a', 'a'], create, dispose)).toThrow()
   expect(create).not.toHaveBeenCalled(); expect(dispose).not.toHaveBeenCalled()
 })
+
+test('replacement retains previous resources until apply succeeds, even for identical IDs', async () => {
+  const { replaceLayerViews } = await import('../src/layer-views.ts')
+  const old = { id: 'same', generation: 'old' }, previous = new Map([['same', old]]), disposed = []
+  let applied
+  replaceLayerViews(previous, ['same'], id => ({ id, generation: 'new' }), views => {
+    expect(disposed).toEqual([])
+    expect(previous.get('same')).toBe(old)
+    applied = views.get('same')
+    expect(applied).not.toBe(old)
+  }, view => disposed.push(view))
+  expect(applied.generation).toBe('new')
+  expect(disposed).toEqual([old])
+})
+
+test('failed replacement application releases only candidate resources', async () => {
+  const { replaceLayerViews } = await import('../src/layer-views.ts')
+  const old = { id: 'same', generation: 'old' }, previous = new Map([['same', old]]), disposed = []
+  expect(() => replaceLayerViews(previous, ['same', 'extra'], id => ({ id, generation: 'new' }), () => {
+    throw new Error('apply failed')
+  }, view => disposed.push(view))).toThrow('apply failed')
+  expect(previous.get('same')).toBe(old)
+  expect(disposed.map(view => view.generation)).toEqual(['new', 'new'])
+})
+
+test('editor rolls its scene references back when the final commit fails', async () => {
+  const { Editor } = await import('../src/editor.ts')
+  const old = { id: 'same', generation: 'old' }, originalSettings = {}, originalLayers = [{ id: 'same' }], originalTextures = new Map()
+  const disposed = []
+  const editor = {
+    views: new Map([['same', old]]), settings: originalSettings, layers: originalLayers,
+    textures: originalTextures, selectedId: 'same',
+    createView: layer => ({ id: layer.id, generation: 'new' }),
+    disposeView: view => disposed.push(view),
+    update(settings, layers, textures) { this.settings = settings; this.layers = layers; this.textures = textures },
+  }
+  expect(() => Editor.prototype.replaceScene.call(editor, { new: true }, [{ id: 'same' }], new Map(), () => {
+    editor.selectedId = 'changed'
+    throw new Error('final commit failed')
+  })).toThrow('final commit failed')
+  expect(editor.settings).toBe(originalSettings)
+  expect(editor.layers).toBe(originalLayers)
+  expect(editor.textures).toBe(originalTextures)
+  expect(editor.selectedId).toBe('same')
+  expect(editor.views.get('same')).toBe(old)
+  expect(disposed).toEqual([{ id: 'same', generation: 'new' }])
+})

@@ -19,3 +19,14 @@ export function reconcileLayerViews<T>(
   for (const [id, view] of previous) if (!next.has(id)) dispose(view)
   return next
 }
+
+/** Keep all previous resources alive until the replacement has been applied successfully. */
+export function replaceLayerViews<T>(previous: ReadonlyMap<string, T>, ids: readonly string[],
+  create: (id: string) => T, apply: (views: Map<string, T>) => void, dispose: (view: T) => void) {
+  const next = reconcileLayerViews(new Map<string, T>(), ids, create, dispose)
+  try { apply(next) } catch (error) {
+    next.forEach(dispose)
+    throw error
+  }
+  previous.forEach(dispose)
+}

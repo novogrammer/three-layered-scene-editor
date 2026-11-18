@@ -1,0 +1,114 @@
+import { expect, test, vi } from 'vitest'
+import { createSceneDocument } from '../src/scene-json.ts'
+import { parseSceneDocument, prepareSceneImport } from '../src/scene-import.ts'
+import { changeOrientation, createLayerModel, defaultSettings, initialLayers, orientationFor, setFrontRect } from '../src/model.ts'
+
+const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 255])
+async function document() {
+  const layers = initialLayers(defaultSettings)
+  const sources = new Map(layers.map(layer => [layer.id, { fileName: `${layer.id}.png`, blob: new Blob([bytes], { type: 'image/png' }) }]))
+  return createSceneDocument(defaultSettings, layers, sources)
+}
+const decode = async () => ({ width: 1920, height: 1080 })
+
+test('save/import/save preserves the full document, source bytes, list order and exact pixel inputs', async () => {
+  const doc = await document()
+  const layer = setFrontRect(initialLayers(defaultSettings)[0], { x: -123.1234567890123, y: 83.9876543210987, width: 678.1234567890123, height: 456.9876543210987 })
+  doc.layers[0].placement = structuredClone(layer.placement)
+  doc.layers.reverse(); doc.assets.reverse(); doc.layers[0].visible = false
+  const before = structuredClone(doc)
+  const restored = await prepareSceneImport(JSON.stringify(doc), async blob => {
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes)
+    return decode()
+  })
+  expect(restored.layers.map(l => l.id)).toEqual(doc.layers.map(l => l.id))
+  expect(restored.layers[0].visible).toBe(false)
+  const saved = await createSceneDocument(restored.settings, restored.layers, restored.assets)
+  expect(saved).toEqual(doc)
+  expect(doc).toEqual(before)
+  restored.layers.forEach(layer => {
+    const clone = createLayerModel(restored.settings, structuredClone(layer))
+    expect({ ...clone.transform }).toEqual({ ...layer.transform })
+  })
+})
+
+test.each(['down', 'up', 'left', 'right'])('%s round-trips its axis-specific surface data without applying FOV correction again', async direction => {
+  const original = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(direction))
+  const sources = new Map([[original.id, { fileName: 'surface.png', blob: new Blob([bytes], { type: 'image/png' }) }]])
+  const doc = await createSceneDocument(defaultSettings, [original], sources)
+  const restored = await prepareSceneImport(JSON.stringify(doc), decode)
+  expect(structuredClone(restored.layers[0])).toEqual(structuredClone(original))
+  expect({ ...restored.layers[0].transform }).toEqual({ ...original.transform })
+})
+
+test('empty scenes and shared image references are valid', async () => {
+  const doc = await document()
+  doc.layers = []; doc.assets = []
+  const restored = await prepareSceneImport(JSON.stringify(doc), vi.fn(() => { throw new Error('no images') }))
+  expect(restored.layers).toEqual([]); expect(restored.assets.size).toBe(0)
+  const shared = await document()
+  shared.layers.forEach(layer => { layer.imageId = shared.assets[0].id })
+  shared.assets.splice(1)
+  const read = vi.fn(decode)
+  const result = await prepareSceneImport(JSON.stringify(shared), read)
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(result.assets.get('layer-1')).toBe(result.assets.get('layer-2'))
+})
+
+test.each([
+  ['version', d => { d.schemaVersion = 2 }],
+  ['missing field', d => { delete d.referencePlane }],
+  ['invalid size', d => { d.composition.width = 0 }],
+  ['fractional resolution', d => { d.composition.width = 1.5 }],
+  ['FOV', d => { d.projectionCamera.fov = 180 }],
+  ['projection mode', d => { d.projection.outsideImage = 'repeat' }],
+  ['duplicate layers', d => { d.layers[1].id = d.layers[0].id }],
+  ['duplicate assets', d => { d.assets[1].id = d.assets[0].id }],
+  ['missing reference', d => { d.layers[0].imageId = 'missing' }],
+  ['too many layers', d => { d.layers = Array(10).fill(d.layers[0]) }],
+  ['direction', d => { d.layers[0].orientation.direction = 'left' }],
+  ['origin Z', d => { d.layers[0].originPx.z = 1 }],
+  ['non-number', d => { d.layers[0].originPx.x = '0' }],
+  ['color', d => { d.layers[0].editorColor = 'blue' }],
+  ['visibility', d => { d.layers[0].visible = 1 }],
+  ['alpha mode', d => { d.layers[0].alphaMode = 'MASK' }],
+  ['zero rectangle', d => { d.layers[0].placement.rectPx.width = 0 }],
+  ['endpoints', d => { d.layers[2].placement.backZPx = 0 }],
+  ['wrong surface axis', d => { delete d.layers[2].placement.widthPx; d.layers[2].placement.heightPx = 100 }],
+])('invalid %s is rejected before decoding any image', async (_, mutate) => {
+  const doc = await document(); mutate(doc)
+  const reader = vi.fn(decode)
+  await expect(prepareSceneImport(JSON.stringify(doc), reader)).rejects.toThrow()
+  expect(reader).not.toHaveBeenCalled()
+})
+
+test.each(['{', 'null', '[]', '"text"'])('invalid JSON root %s is rejected', text => {
+  expect(() => parseSceneDocument(text)).toThrow()
+})
+
+test.each([
+  ['external URL', d => { d.assets[0].data = 'https://example.com/image.png' }],
+  ['MIME mismatch', d => { d.assets[0].mimeType = 'image/jpeg' }],
+  ['base64', d => { d.assets[0].data = 'data:image/png;base64,@@@@' }],
+  ['empty image', d => { d.assets[0].data = 'data:image/png;base64,' }],
+  ['camera crossing', d => { d.layers[0].placement.zPx = 2000 }],
+  ['infinite derived geometry', d => { d.layers[0].placement.rectPx.x = 1e300 }],
+  ['unrenderable origin', d => { d.layers[0].originPx.x = 1e300 }],
+])('invalid %s does not alter an existing edited scene', async (_, mutate) => {
+  const current = initialLayers(defaultSettings), before = structuredClone(current)
+  const doc = await document(); mutate(doc)
+  await expect(prepareSceneImport(JSON.stringify(doc), decode)).rejects.toThrow()
+  expect(structuredClone(current)).toEqual(before)
+})
+
+test('a late image decoding failure leaves edited data intact and does not return a partial scene', async () => {
+  const doc = await document(), current = initialLayers(defaultSettings), before = structuredClone(current)
+  const reader = vi.fn().mockResolvedValueOnce({ width: 1920, height: 1080 }).mockRejectedValueOnce(new Error('画像が壊れています'))
+  await expect(prepareSceneImport(JSON.stringify(doc), reader)).rejects.toThrow('壊れています')
+  expect(reader).toHaveBeenCalledTimes(2)
+  expect(structuredClone(current)).toEqual(before)
+})
+
+test.each([{ width: 8193, height: 1 }, { width: 0, height: 1 }, { width: NaN, height: 1 }])('invalid decoded dimensions are rejected', async size => {
+  await expect(prepareSceneImport(JSON.stringify(await document()), async () => size)).rejects.toThrow('寸法')
+})

@@ -5,7 +5,7 @@ import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
 import { centeredCover } from './image-fit'
-import { reconcileLayerViews } from './layer-views'
+import { reconcileLayerViews, replaceLayerViews } from './layer-views'
 import { layerRenderSort } from './render-order'
 import type { ImageDimensions } from './image-fit'
 import type { Layer, SceneSettings } from './model'
@@ -119,6 +119,23 @@ export class Editor {
         materials.forEach(material => material.dispose())
       }
     })
+  }
+
+  replaceScene(settings: SceneSettings, layers: Layer[], textures: ReadonlyMap<string, THREE.Texture>, commit: () => void) {
+    const previous = { views: this.views, settings: this.settings, layers: this.layers, textures: this.textures, selectedId: this.selectedId }
+    try {
+      replaceLayerViews(previous.views, layers.map(layer => layer.id),
+        id => this.createView(layers.find(layer => layer.id === id)!, textures.get(id)!), views => {
+          this.views = views
+          this.update(settings, layers, textures)
+          commit()
+        }, view => this.disposeView(view))
+    } catch (error) {
+      this.views = previous.views
+      this.selectedId = previous.selectedId
+      this.update(previous.settings, previous.layers, previous.textures)
+      throw error
+    }
   }
 
   update(settings: SceneSettings, layers: Layer[], textures: ReadonlyMap<string, THREE.Texture> = this.textures) {

@@ -3,6 +3,7 @@ import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { loadDemoImages } from './demo'
 import { createSceneDocument } from './scene-json'
+import { MAX_SCENE_JSON_BYTES, prepareSceneImport } from './scene-import'
 import type { ImageSource } from './scene-json'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
@@ -17,11 +18,13 @@ let layers = initialLayers(settings)
 let selectedId: string | null = layers[0]?.id ?? null
 let adding = false
 let saving = false
+let loading = false
+let sceneRevision = 0
 let depthMode = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
 interface LayerAsset extends ImageSource { image: HTMLImageElement; texture: THREE.Texture; name: string }
-const assets = new Map<string, LayerAsset>()
+let assets = new Map<string, LayerAsset>()
 const imageRequests = new Map<string, symbol>()
 const textureMap = () => new Map([...assets].map(([id, asset]) => [id, asset.texture]))
 
@@ -75,9 +78,9 @@ function fitStages() {
   editor?.requestRender()
 }
 
-function sync() {
+function sync(updateEditor = true) {
   editor.selectedId = selectedId
-  editor.update(settings, layers, textureMap())
+  if (updateEditor) editor.update(settings, layers, textureMap())
   const metrics = referenceMetrics(settings)
   get('camera-info').textContent = `基準平面 ${metrics.width.toFixed(3)} × ${metrics.height.toFixed(3)} / カメラZ +${metrics.cameraZ.toFixed(3)}`
   const warning = layers.some((layer) => layer.transform.z >= metrics.cameraZ - metrics.near)
@@ -325,7 +328,7 @@ function updateAddButton() {
   button.title = layers.length >= MAX_LAYERS ? `最大${MAX_LAYERS}枚です` : '画像からレイヤーを追加'
 }
 
-async function decodeImage(file: File) {
+async function decodeImage(file: Blob) {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('PNG・JPEG・WebPの画像を選んでください。')
   if (file.size > 32 * 1024 * 1024) throw new Error('画像は32MB以下にしてください。')
   const url = URL.createObjectURL(file)
@@ -343,11 +346,12 @@ async function addImageLayer(file: File) {
   if (adding) return
   if (layers.length >= MAX_LAYERS) { status(`レイヤーは${MAX_LAYERS}枚まで追加できます。`, true); return }
   adding = true
+  const revision = sceneRevision
   updateAddButton()
   status('画像を読み込み中…')
   try {
     const image = await decodeImage(file)
-    if (!alive) return
+    if (!alive || revision !== sceneRevision) return
     const layer = createLayer(settings, layers, crypto.randomUUID(), file.name.replace(/\.[^.]+$/, '') || file.name)
     const texture = makeTexture(image)
     assets.set(layer.id, { image, texture, blob: file, fileName: file.name, name: `${file.name} / ${image.width} × ${image.height}` })
@@ -356,7 +360,7 @@ async function addImageLayer(file: File) {
     sync(); renderList(); renderPanel()
     status('レイヤーを追加しました。')
   } catch (error) {
-    if (alive) status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
+    if (alive && revision === sceneRevision) status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
   } finally {
     adding = false
     if (alive) updateAddButton()
@@ -393,6 +397,53 @@ async function loadImage(file: File, id: string) {
     if (alive && imageRequests.get(id) === request && assets.has(id)) {
       status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
     }
+  }
+}
+
+async function loadJson(file: File) {
+  if (loading) return
+  loading = true
+  const button = get<HTMLButtonElement>('load-json'); button.disabled = true
+  const nextAssets = new Map<string, LayerAsset>()
+  let installed = false
+  status('JSONを読み込み中…')
+  try {
+    if (file.size > MAX_SCENE_JSON_BYTES) throw new Error('JSONは400MB以下にしてください。')
+    const prepared = await prepareSceneImport(await file.text(), decodeImage)
+    if (!alive) return
+    for (const [id, asset] of prepared.assets) {
+      nextAssets.set(id, { ...asset, texture: makeTexture(asset.image),
+        name: `${asset.fileName} / ${asset.image.width} × ${asset.image.height}` })
+    }
+    const previous = { settings, layers, assets, selectedId }
+    const form = get<HTMLFormElement>('settings-form')
+    const keys = ['width', 'height', 'referenceHeight', 'fov'] as const
+    const oldInputs = keys.map(key => (form.elements.namedItem(key) as HTMLInputElement).value)
+    try {
+      editor.replaceScene(prepared.settings, prepared.layers,
+        new Map([...nextAssets].map(([id, asset]) => [id, asset.texture])), () => {
+          settings = prepared.settings; layers = prepared.layers; assets = nextAssets
+          selectedId = layers[0]?.id ?? null
+          keys.forEach(key => { (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key]) })
+          sync(false); renderList(); renderPanel()
+        })
+    } catch (error) {
+      settings = previous.settings; layers = previous.layers; assets = previous.assets; selectedId = previous.selectedId
+      keys.forEach((key, index) => { (form.elements.namedItem(key) as HTMLInputElement).value = oldInputs[index] })
+      sync(false); renderList(); renderPanel()
+      throw error
+    }
+    installed = true
+    sceneRevision++
+    imageRequests.clear()
+    previous.assets.forEach(asset => asset.texture.dispose())
+    status('JSONを読み込みました。')
+  } catch (error) {
+    if (alive) status(error instanceof Error ? error.message : 'JSONを読み込めませんでした。', true)
+  } finally {
+    if (!installed) nextAssets.forEach(asset => asset.texture.dispose())
+    loading = false
+    if (alive) button.disabled = false
   }
 }
 
@@ -455,6 +506,9 @@ async function start() {
     inputs.forEach((element) => { element.disabled = false })
     maxTextureSize = editor.maxTextureSize
     get('save-json').onclick = () => { void saveJson() }
+    const loadInput = get<HTMLInputElement>('load-json-file')
+    get('load-json').onclick = () => { loadInput.value = ''; loadInput.click() }
+    loadInput.onchange = () => { const file = loadInput.files?.[0]; if (file) void loadJson(file) }
     const addInput = get<HTMLInputElement>('add-layer-image')
     get('add-layer').onclick = () => { addInput.value = ''; addInput.click() }
     addInput.onchange = () => { const file = addInput.files?.[0]; if (file) void addImageLayer(file) }
