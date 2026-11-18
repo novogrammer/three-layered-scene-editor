@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene, Texture, Vector3 } from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { parseProjectionGlb, restoreProjectionAsset, projectionRenderSort } from '../src/glb-viewer/index.ts'
+import { parseProjectionGlb, restoreProjectionAsset, projectionRenderSort } from '../src/glb-projection.ts'
 // Only the test harness imports the producer to exercise the real GLB contract.
 import { createSceneGlb } from '../src/scene-glb.ts'
 import { initialLayers, defaultSettings } from '../src/model.ts'
@@ -50,14 +50,12 @@ function fixture() {
   return scene
 }
 
-test('portable modules depend only on Three.js and their own directory, without DOM or viewer UI', async () => {
-  const directory = new URL('../src/glb-viewer/', import.meta.url)
-  for (const file of await readdir(directory)) {
-    const source = await readFile(new URL(file, directory), 'utf8')
-    const imports = [...source.matchAll(/(?:from\s+|import\s*\()(['"])([^'"]+)\1/g)].map(match => match[2])
-    expect(imports.every(name => name === 'three' || name.startsWith('three/') || /^\.\/[^/]+$/.test(name)), file).toBe(true)
-    expect(source, file).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver)\b|import\.meta/)
-  }
+test('reusable module depends only on Three.js, without local imports, DOM or viewer UI', async () => {
+  const source = await readFile(new URL('../src/glb-projection.ts', import.meta.url), 'utf8')
+  const imports = [...source.matchAll(/(?:from\s+|import\s*\()(['"])([^'"]+)\1/g)].map(match => match[2])
+  expect(imports.length).toBeGreaterThan(0)
+  expect(imports.every(name => name === 'three' || name.startsWith('three/'))).toBe(true)
+  expect(source).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver)\b|import\.meta/)
 })
 
 test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('restores actual exported GLB using extras alone, preserving UV and texture identity', async settings => {

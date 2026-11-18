@@ -1,6 +1,6 @@
 # GLBからの投影表示の復元
 
-GLBは利用側へ渡す単一の成果物とする。編集JSONは復元に不要。一般的なGLBビューアーは標準マテリアルと頂点UVで近似表示し、専用表示側はGLB内のカメラ・画像・extrasを使って投影表示を復元する。再利用する読み込み側の実装は`src/glb-viewer/`、デモUIは`src/viewer.ts`、表示ページは`viewer.html`。
+GLBは利用側へ渡す単一の成果物とする。編集JSONは復元に不要。一般的なGLBビューアーは標準マテリアルと頂点UVで近似表示し、専用表示側はGLB内のカメラ・画像・extrasを使って投影表示を復元する。再利用する読み込み側の実装は`src/glb-projection.ts`、デモUIは`src/viewer.ts`、表示ページは`viewer.html`。
 
 型は`src/glb-projection-extras.ts`に定義する。glTFの`extras.threeLayeredScene`に格納し、Three.jsのGLTFLoaderでは各オブジェクトの`userData.threeLayeredScene`から取得できる。TSLのコードやノード構造、GPU固有の設定は保存しない。
 
@@ -103,28 +103,27 @@ color = map(clamp(imageUV, 0, 1))
 - 読み込み時にextrasのバージョン・座標規約・参照、レイヤーIDと一覧順の重複、カメラ設定、mapとUVを検証する。TSLと標準表示のシェーダーを準備してから現在の表示を置き換える。読み込み失敗時はエラーを表示し、既存の表示を残す。
 - GLBは400MiB以下とし、外部ファイル参照には対応しない。新しいGLBへの差し替え時は旧マテリアル・テクスチャ・ジオメトリを解放する。
 
-`src/glb-viewer/`の依存先はThree.jsとそのaddons、同ディレクトリ内のモジュールだけ。DOM・Vite・レンダラー・ファイル選択・OrbitControls・エディター側のコードや型には依存しない。`src/viewer.ts`はこのAPIを呼ぶデモUIで、レンダラー・表示用カメラ・操作・シェーダーの事前コンパイル・画面の差し替えを担当する。
+`src/glb-projection.ts`の依存先はThree.jsとそのaddonsだけ。DOM・Vite・レンダラー・ファイル選択・OrbitControls・エディター側のコードや型には依存しない。`src/viewer.ts`はこのAPIを呼ぶデモUIで、レンダラー・表示用カメラ・操作・シェーダーの事前コンパイル・画面の差し替えを担当する。
 
 自動テストでは実際のGLB出力をGLTFLoaderで読み戻し、独立した復元APIへ渡す。テスト中の画像デコードは置き換え、画像参照・座標・extras・表示モードの切り替え・不正データの拒否を確認する。GPUでの見た目とブラウザー操作の確認は未実施。
 
 
 ## 別プロジェクトでの再利用
 
-`src/glb-viewer/`ディレクトリ全体をコピーし、Three.jsを用意する。エディター側のファイル、viewer.html、viewer.tsは不要。現在はThree.js 0.187系で検証している。NodeMaterialを描画するレンダラーはWebGPURenderer（WebGL 2フォールバックを含む）を使う。
+`src/glb-projection.ts`の1ファイルをコピーし、Three.jsを用意する。エディター側のファイル、viewer.html、viewer.tsは不要。現在はThree.js 0.187系で検証している。NodeMaterialを描画するレンダラーはWebGPURenderer（WebGL 2フォールバックを含む）を使う。
 
-| モジュール | 役割 |
+| ファイル | 役割 |
 | --- | --- |
-| index.ts | 公開APIと型の入口 |
-| load.ts | GLBバッファの読み込み、TSL適用、読み込んだリソース全体の管理 |
-| asset.ts | 読み込み済みシーンのextras検証・投影の組み立て、表示モード・投影行列の更新、深度が同じ場合のソート |
-| material.ts | TSL投影マテリアルの生成 |
-| metadata.ts | 読み込み側で独立して持つextrasの型・検証 |
+| glb-projection.ts | GLB読み込み、extrasの型・検証、TSL適用、投影行列・表示モードの更新、リソース管理 |
+| viewer.ts | デモUI、レンダラー、表示用カメラ、操作、シェーダーの事前コンパイル |
+
+再利用するのは`glb-projection.ts`だけ。公開APIとリソースの所有権は従来どおりとし、ファイル選択やURL取得、画面の差し替えタイミングは呼び出し側が担当する。
 
 ### GLBの読み込みとTSL適用
 
 ```ts
 import * as THREE from 'three/webgpu'
-import { parseProjectionGlb, projectionRenderSort } from './glb-viewer'
+import { parseProjectionGlb, projectionRenderSort } from './glb-projection'
 
 // URL取得やFileの選択は、呼び出し側の責務。
 const response = await fetch('/scene.glb')
@@ -162,7 +161,7 @@ asset.dispose()
 ### 既存のGLTFLoaderへ組み込む場合
 
 ```ts
-import { restoreProjectionAsset } from './glb-viewer'
+import { restoreProjectionAsset } from './glb-projection'
 
 const gltf = await myLoader.loadAsync('/scene.glb')
 const projection = restoreProjectionAsset(gltf.scene)

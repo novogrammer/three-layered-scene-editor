@@ -1,8 +1,8 @@
-/** Demo UI; GLB loading and projection are reusable independently in ./glb-viewer. */
+/** Demo UI; GLB loading and projection are reusable independently in ./glb-projection. */
 import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { MAX_PROJECTION_GLB_BYTES, parseProjectionGlb, projectionRenderSort } from './glb-viewer'
-import type { LoadedProjectionAsset, ProjectionMode } from './glb-viewer'
+import { MAX_PROJECTION_GLB_BYTES, parseProjectionGlb, projectionRenderSort } from './glb-projection'
+import type { LoadedProjectionAsset, ProjectionMode } from './glb-projection'
 
 async function startViewer(canvas: HTMLCanvasElement) {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
