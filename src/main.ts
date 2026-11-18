@@ -5,8 +5,8 @@ import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
-import type { Layer, PlaneDirection, SceneSettings } from './model'
+import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
+import type { Layer, PlacementUnit, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -15,6 +15,7 @@ let layers = initialLayers(settings)
 let selectedId: string | null = layers[0]?.id ?? null
 let adding = false
 let depthMode = 'screen'
+let surfaceUnit: PlacementUnit = 'scene'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
 interface LayerAsset { image: HTMLImageElement; texture: THREE.Texture; name: string }
@@ -231,6 +232,17 @@ function renderPanel() {
   mode.value = layer.alphaMode
   mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; sync() }
   modeLabel.append(mode); panel.append(modeLabel)
+  const surfaceValues = layer.orientation.relation === 'perpendicular' ? surfacePlacementValues(layer, surfaceUnit) : null
+  const pixelSurface = surfaceValues !== null && surfaceUnit === 'px'
+  const inputScale = pixelSurface ? 1 / referenceMetrics(settings).scale : 1
+  if (surfaceValues) {
+    const unitLabel = document.createElement('label'); unitLabel.textContent = '配置の単位'
+    const unit = document.createElement('select')
+    unit.innerHTML = '<option value="px">px相当</option><option value="scene">シーン単位</option>'
+    unit.value = surfaceUnit
+    unit.onchange = () => { surfaceUnit = unit.value as PlacementUnit; renderPanel() }
+    unitLabel.append(unit); panel.append(unitLabel)
+  }
   if (layer.orientation.relation === 'parallel') {
     const title = document.createElement('h2'); title.textContent = '2D配置 · px'
     title.title = '基準カメラから見た矩形。共通キャンバスの左上が原点で、Xは右、Yは下が正です。'
@@ -266,39 +278,41 @@ function renderPanel() {
   } else {
     const grid = document.createElement('div'); grid.className = 'pair'; panel.append(grid)
     const wall = isWall(layer)
-    const fields: [keyof Layer['transform'], string][] = wall
-      ? [['y', '中心Y'], ['height', '高さ']]
-      : [['x', '中心X'], ['width', '幅']]
+    const fields = [['center', wall ? '中心Y' : '中心X'], ['size', wall ? '高さ' : '幅']] as const
     for (const [key, label] of fields) {
-      numberField(grid, label, layer.transform[key], (value) => { layer.transform[key] = value },
-        key === 'width' || key === 'height' ? 0.01 : -500, 500)
+      numberField(grid, label, surfaceValues![key], value => {
+        replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, key, value))
+      }, (key === 'size' ? 0.01 : -500) * inputScale, 500 * inputScale)
     }
-    const range = layer.depthRange!
-    const frontInput = numberField(grid, '手前端Z', range.frontZ, (value) => {
-      replaceLayer(setDepthRange(layer, value, range.backZ))
-    }, -1000, 1000)
-    const backInput = numberField(grid, '奥端Z', range.backZ, (value) => {
-      replaceLayer(setDepthRange(layer, range.frontZ, value))
-    }, -1000, 1000)
+    const frontInput = numberField(grid, '手前端Z', surfaceValues!.frontZ, value => {
+      replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, 'frontZ', value))
+    }, -1000 * inputScale, 1000 * inputScale)
+    const backInput = numberField(grid, '奥端Z', surfaceValues!.backZ, value => {
+      replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, 'backZ', value))
+    }, -1000 * inputScale, 1000 * inputScale)
     coordinateHint(grid, '基準面 Z = 0', 'reference-z-coordinate', [frontInput, backInput])
 
   }
   const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点'; originTitle.title = '基準点を動かすと、面も同じ量だけ移動します。'
   panel.append(originTitle)
   const metrics = referenceMetrics(settings)
+  const referenceWidth = pixelSurface ? settings.width : metrics.width
+  const referenceHeight = pixelSurface ? settings.height : metrics.height
   const edges = {
-    down: ['下端', 'y', -metrics.height / 2],
-    up: ['上端', 'y', metrics.height / 2],
-    left: ['左端', 'x', -metrics.width / 2],
-    right: ['右端', 'x', metrics.width / 2],
+    down: ['下端', 'y', -referenceHeight / 2],
+    up: ['上端', 'y', referenceHeight / 2],
+    left: ['左端', 'x', -referenceWidth / 2],
+    right: ['右端', 'x', referenceWidth / 2],
   } as const
   const edge = layer.orientation.relation === 'perpendicular' ? edges[layer.orientation.direction] : null
   const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
   const originInputs: HTMLInputElement[] = []
   for (const key of ['x', 'y'] as const) {
-    const originInput = numberField(originFields, key.toUpperCase(), layer.origin[key], (value) => {
-      replaceLayer(moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y))
-    }, -500, 500)
+    const field = key === 'x' ? 'originX' : 'originY'
+    const originInput = numberField(originFields, key.toUpperCase(), surfaceValues ? surfaceValues[field] : layer.origin[key], value => {
+      replaceLayer(surfaceValues ? setSurfacePlacementValue(layer, surfaceUnit, field, value)
+        : moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y))
+    }, -500 * inputScale, 500 * inputScale)
     originInput.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()}`)
     originInputs.push(originInput)
   }

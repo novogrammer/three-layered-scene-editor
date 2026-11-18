@@ -162,6 +162,42 @@ export function setDepthRange(layer: Layer, frontZ: number, backZ: number): Laye
 function layerScale(layer: Layer) { return referenceMetrics(configurations.get(layer)!).scale }
 function cloneLayer(layer: Layer) { return createLayerModel(configurations.get(layer)!, layer) }
 
+export type PlacementUnit = 'px' | 'scene'
+export type SurfaceField = 'center' | 'size' | 'frontZ' | 'backZ' | 'originX' | 'originY'
+
+export function surfacePlacementValues(layer: Layer, unit: PlacementUnit): Record<SurfaceField, number> {
+  const p = layer.placement
+  if (p.type !== 'surface') throw new Error('垂直な面を指定してください。')
+  const factor = unit === 'px' ? 1 : layerScale(layer)
+  return { center: p.centerPx * factor, size: p.sizePx * factor,
+    frontZ: p.frontZPx * factor, backZ: p.backZPx * factor,
+    originX: layer.originPx.x * factor, originY: layer.originPx.y * factor }
+}
+
+/** Pixel input updates the canonical value directly; switching display units never calls this. */
+export function setSurfacePlacementValue(layer: Layer, unit: PlacementUnit, field: SurfaceField, value: number): Layer {
+  const values = surfacePlacementValues(layer, unit)
+  assertFinite(value)
+  if (value === values[field]) return cloneLayer(layer)
+  const px = unit === 'px' ? value : value / layerScale(layer)
+  assertFinite(px)
+  if (field === 'originX' || field === 'originY') {
+    return moveOriginPx(layer, field === 'originX' ? px : layer.originPx.x,
+      field === 'originY' ? px : layer.originPx.y)
+  }
+  const result = cloneLayer(layer)
+  const p = result.placement as Extract<Placement, { type: 'surface' }>
+  if (field === 'center') p.centerPx = px
+  if (field === 'size') {
+    if (px <= 0) throw new Error('サイズは正の値にしてください。')
+    p.sizePx = px
+  }
+  if (field === 'frontZ') p.frontZPx = px
+  if (field === 'backZ') p.backZPx = px
+  if (p.frontZPx <= p.backZPx) throw new Error('手前端Zは奥端Zより大きい値にしてください。')
+  return result
+}
+
 export function defaultOrigin(settings: SceneSettings, direction: PlaneDirection): PlacementOrigin {
   const metrics = referenceMetrics(settings)
   return {
@@ -173,10 +209,16 @@ export function defaultOrigin(settings: SceneSettings, direction: PlaneDirection
 
 export function moveOrigin(layer: Layer, x: number, y: number): Layer {
   assertFinite(x, y)
-  const result = cloneLayer(layer), scale = layerScale(layer)
-  const dx = x === layer.origin.x ? 0 : x / scale - layer.originPx.x
-  const dy = y === layer.origin.y ? 0 : y / scale - layer.originPx.y
-  result.originPx.x += dx; result.originPx.y += dy
+  const scale = layerScale(layer)
+  return moveOriginPx(layer, x === layer.origin.x ? layer.originPx.x : x / scale,
+    y === layer.origin.y ? layer.originPx.y : y / scale)
+}
+
+function moveOriginPx(layer: Layer, x: number, y: number): Layer {
+  assertFinite(x, y)
+  const result = cloneLayer(layer)
+  const dx = x - layer.originPx.x, dy = y - layer.originPx.y
+  result.originPx.x = x; result.originPx.y = y
   const p = result.placement
   if (p.type === 'screen') {
     const config = configurations.get(layer)!, metrics = referenceMetrics(config)
