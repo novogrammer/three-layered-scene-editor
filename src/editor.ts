@@ -2,9 +2,12 @@ import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { projectionMaterial } from './projection'
 import { referenceMetrics } from './model'
+import { applyLayerTransform } from './layer-transform'
 import type { Layer, SceneSettings } from './model'
 
 interface LayerView {
+  root: THREE.Group
+  originMarker: THREE.AxesHelper
   mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicNodeMaterial>
   outline: THREE.LineSegments
   projection: ReturnType<typeof projectionMaterial>
@@ -67,9 +70,12 @@ export class Editor {
       const projection = projectionMaterial(textures[index]!, this.projectionMatrix, layer.editorColor)
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), projection.material)
       const outline = this.makeOutline(layer.editorColor)
+      const root = new THREE.Group()
+      const originMarker = new THREE.AxesHelper(0.4)
       mesh.add(outline)
-      this.scene.add(mesh)
-      return { mesh, outline, projection }
+      root.add(mesh, originMarker)
+      this.scene.add(root)
+      return { root, originMarker, mesh, outline, projection }
     })
     this.workCamera.position.set(13, 8, 16)
     this.controls = new OrbitControls(this.workCamera, workCanvas)
@@ -122,16 +128,11 @@ export class Editor {
     this.baseCamera.updateProjectionMatrix()
     this.workCamera.far = Math.max(1000, this.baseCamera.far * 2)
     this.workCamera.updateProjectionMatrix()
-    this.views.forEach(({ mesh, outline, projection }, i) => {
+    this.views.forEach(({ root, mesh, outline, projection }, i) => {
       const layer = layers[i]!
-      const t = layer.transform
-      mesh.position.set(t.x, t.y, t.z)
-      mesh.rotation.x = layer.kind === 'ground' ? -Math.PI / 2 : 0
-      mesh.scale.set(t.width, t.height, 1)
-      mesh.visible = layer.visible
+      applyLayerTransform(root, mesh, layer)
       projection.uniforms.editorColor.value.set(layer.editorColor)
       ;(outline.material as THREE.LineBasicMaterial).color.set(layer.editorColor)
-      mesh.updateMatrixWorld(true)
     })
     this.requestRender()
   }
@@ -193,10 +194,11 @@ export class Editor {
 
   private prepareView(work: boolean) {
     this.helpers.visible = work
-    this.views.forEach(({ mesh, outline, projection }, i) => {
+    this.views.forEach(({ mesh, outline, originMarker, projection }, i) => {
       const diagnostic = work ? this.diagnostic : 0
       projection.uniforms.diagnosticMode.value = diagnostic
       outline.visible = work
+      originMarker.visible = work
       ;(outline.material as THREE.LineBasicMaterial).opacity = i === this.selected ? 1 : 0.35
       const transparent = diagnostic !== 0 || this.layers[i]!.alphaMode === 'BLEND'
       if (mesh.material.transparent !== transparent) {

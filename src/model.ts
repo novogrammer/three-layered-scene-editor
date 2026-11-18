@@ -8,11 +8,17 @@ export interface SceneSettings {
 
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Transform { x: number; y: number; z: number; width: number; height: number }
+export type RotationPreset = 'front' | 'ground' | 'left-wall' | 'right-wall' | 'ceiling'
+export interface PlacementOrigin { x: number; y: number; z: 0 }
+export const rotationPresets: Record<RotationPreset, string> = {
+  front: '正面', ground: '地面', 'left-wall': '左壁', 'right-wall': '右壁', ceiling: '天井',
+}
 export type AlphaMode = 'OPAQUE' | 'BLEND'
 export interface Layer {
   id: string
   name: string
-  kind: 'front' | 'ground'
+  kind: RotationPreset
+  origin: PlacementOrigin
   editorColor: string
   visible: boolean
   alphaMode: AlphaMode
@@ -24,6 +30,50 @@ export const defaultSettings: SceneSettings = { width: 1920, height: 1080, refer
 
 // The static sample ground image was exported to match this initial geometry.
 export const defaultGroundTransform: Transform = { x: 0, y: -2.5, z: -8, width: 60, height: 40 }
+
+export function defaultOrigin(settings: SceneSettings, preset: RotationPreset): PlacementOrigin {
+  const metrics = referenceMetrics(settings)
+  return {
+    x: preset === 'left-wall' ? -metrics.width / 2 : preset === 'right-wall' ? metrics.width / 2 : 0,
+    y: preset === 'ground' ? -metrics.height / 2 : preset === 'ceiling' ? metrics.height / 2 : 0,
+    z: 0,
+  }
+}
+
+/** Normals face the interior of the box. No free Euler-angle editing. */
+export function presetRotation(preset: RotationPreset): [number, number, number] {
+  switch (preset) {
+    case 'ground': return [-Math.PI / 2, 0, 0]
+    case 'ceiling': return [Math.PI / 2, 0, 0]
+    case 'left-wall': return [0, Math.PI / 2, 0]
+    case 'right-wall': return [0, -Math.PI / 2, 0]
+    case 'front': return [0, 0, 0]
+  }
+}
+
+/** Move the placement origin and geometry together; the origin always stays at z=0. */
+export function moveOrigin(layer: Layer, x: number, y: number): Layer {
+  if (![x, y].every(Number.isFinite)) throw new Error('配置基準点には有限の数値を指定してください。')
+  return {
+    ...layer,
+    origin: { x, y, z: 0 },
+    rect: { ...layer.rect },
+    transform: { ...layer.transform, x: layer.transform.x + x - layer.origin.x, y: layer.transform.y + y - layer.origin.y },
+  }
+}
+
+export function changePreset(settings: SceneSettings, layer: Layer, preset: RotationPreset): Layer {
+  if (preset === layer.kind) return layer
+  const origin = defaultOrigin(settings, preset)
+  const moved = moveOrigin(layer, origin.x, origin.y)
+  if (preset === 'ground' || preset === 'ceiling') moved.transform.y = origin.y
+  if (preset === 'left-wall' || preset === 'right-wall') moved.transform.x = origin.x
+  const metrics = referenceMetrics(settings)
+  if (preset === 'front' && moved.transform.z >= metrics.cameraZ - metrics.near) {
+    throw new Error('正面に変更する前に、中心Zをカメラより奥へ移動してください。')
+  }
+  return { ...moved, kind: preset }
+}
 
 export function referenceMetrics(settings: SceneSettings) {
   const { width, height, referenceHeight, fov } = settings
@@ -76,11 +126,14 @@ export function initialLayers(settings: SceneSettings): Layer[] {
   const rect = { x: 0, y: 0, width: settings.width, height: settings.height }
   return [
     { id: 'layer-1', name: 'レイヤー 1', kind: 'front', editorColor: '#78c5b1', visible: true,
+      origin: defaultOrigin(settings, 'front'),
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, -40) },
     { id: 'layer-2', name: 'レイヤー 2', kind: 'front', editorColor: '#efb66d', visible: true,
+      origin: defaultOrigin(settings, 'front'),
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, 1) },
     { id: 'ground', name: '地面', kind: 'ground', editorColor: '#9695e4', visible: true,
-      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform } },
+      origin: defaultOrigin(settings, 'ground'),
+      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform, y: defaultOrigin(settings, 'ground').y } },
   ]
 }
 
@@ -109,6 +162,6 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
     if (layer.kind === 'front' && transform.z >= metrics.cameraZ - metrics.near) {
       throw new Error('設定変更後にカメラのnear面を越えるレイヤーがあります。奥行きを下げてから適用してください。')
     }
-    return { ...layer, rect, transform }
+    return { ...layer, origin: { ...layer.origin }, rect, transform }
   })
 }

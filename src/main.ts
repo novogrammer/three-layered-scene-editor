@@ -2,7 +2,7 @@ import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
-import { defaultSettings, frontRect, initialLayers, placeFront, reconfigureScene, referenceMetrics } from './model'
+import { changePreset, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, rotationPresets } from './model'
 import type { Layer, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -85,7 +85,7 @@ function renderList() {
     const name = document.createElement('span')
     name.textContent = layer.name
     const detail = document.createElement('small')
-    detail.textContent = layer.visible ? (layer.kind === 'ground' ? '水平' : '正面') : '非表示'
+    detail.textContent = layer.visible ? rotationPresets[layer.kind] : '非表示'
     button.append(dot, name, detail)
     button.onclick = () => {
       selected = index
@@ -127,6 +127,24 @@ function renderPanel() {
   const panel = get('layer-panel')
   panel.replaceChildren()
   const title = document.createElement('h2'); title.textContent = `${layer.name}の設定`; panel.append(title)
+  const presetLabel = document.createElement('label'); presetLabel.textContent = '回転プリセット'
+  const preset = document.createElement('select')
+  for (const [value, name] of Object.entries(rotationPresets)) {
+    const option = document.createElement('option'); option.value = value; option.textContent = name
+    preset.append(option)
+  }
+  preset.value = layer.kind
+  preset.onchange = () => {
+    try {
+      layers[selected] = changePreset(settings, layer, preset.value as Layer['kind'])
+      sync(); renderList(); renderPanel()
+      status('回転プリセットと基準点を変更しました。画像と面のサイズは維持しています。')
+    } catch (error) {
+      status(error instanceof Error ? error.message : 'プリセットを変更できませんでした。', true)
+      renderPanel()
+    }
+  }
+  presetLabel.append(preset); panel.append(presetLabel)
   const fileLabel = document.createElement('label'); fileLabel.textContent = '画像を読み込む（PNG / JPEG / WebP）'
   const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'
   fileLabel.append(input); panel.append(fileLabel)
@@ -174,14 +192,31 @@ function renderPanel() {
     }
   } else {
     const grid = document.createElement('div'); grid.className = 'pair'; panel.append(grid)
-    for (const [key, label] of [['y', '地面の高さY'], ['z', '中心Z'], ['x', '中心X'], ['width', '幅'], ['height', '奥行きサイズ']] as const) {
+    const wall = layer.kind === 'left-wall' || layer.kind === 'right-wall'
+    const fields: [keyof Layer['transform'], string][] = wall
+      ? [['y', '面の中心Y'], ['z', '面の中心Z'], ['width', '奥行きサイズ'], ['height', '高さ']]
+      : [['x', '面の中心X'], ['z', '面の中心Z'], ['width', '幅'], ['height', '奥行きサイズ']]
+    for (const [key, label] of fields) {
       numberField(grid, label, layer.transform[key], (value) => { layer.transform[key] = value },
         key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
     const hint = document.createElement('p'); hint.className = 'hint'
-    hint.textContent = '地面はXZ面に水平。FOV変更時は見え方を保つよう中心Zと奥行きを調整し、高さ・幅は維持します。'
+    hint.textContent = layer.kind === 'ground'
+      ? 'FOV変更時は中心Zと奥行きを調整します。高さは下の配置基準点Yで指定します。'
+      : '面の位置は配置基準点で指定します。壁・天井のFOV追従は未決定のため、現在は3D配置を維持します。'
     panel.append(hint)
   }
+  const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点（Z = 0）'
+  panel.append(originTitle)
+  const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
+  for (const [key, label] of [['x', '基準点X'], ['y', '基準点Y']] as const) {
+    numberField(originFields, label, layer.origin[key], (value) => {
+      layers[selected] = moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y)
+    }, -500, 500)
+  }
+  const originHint = document.createElement('p'); originHint.className = 'hint'
+  originHint.textContent = '基準点は基準平面上に固定。配置確認ビューの小さなXYZ軸が基準点です。'
+  panel.append(originHint)
 }
 
 async function loadImage(file: File, index: number) {
