@@ -115,3 +115,38 @@ test('invalid scene edits leave authoring data untouched', () => {
   expect(() => setFrontDepth(layer, 100, true)).toThrow()
   expect(copy(layer)).toEqual(original)
 })
+
+test('2D rectangle edits preserve exact pixel inputs, depth and origin, and project to the requested bounds', async () => {
+  const { setFrontRect, setFrontDepth } = await import('../src/model.ts')
+  const { PerspectiveCamera, Vector3 } = await import('three')
+  const rect = { x: -123.1234567890123, y: 57.8765432109876, width: 678.123456789, height: 432.987654321 }
+  for (const z of [-40, 0, 2]) {
+    const source = setFrontDepth(initialLayers(defaultSettings)[0], z, true), before = copy(source)
+    const layer = setFrontRect(source, rect)
+    expect(layer.placement.rectPx).toEqual(rect)
+    expect(layer.placement.rectPx).not.toBe(rect)
+    expect(layer.placement.zPx).toBe(source.placement.zPx)
+    expect(layer.originPx).toEqual(source.originPx)
+    expect(copy(source)).toEqual(before)
+    const m = referenceMetrics(defaultSettings)
+    const camera = new PerspectiveCamera(defaultSettings.fov, m.aspect, m.near, 1000)
+    camera.position.z = m.cameraZ; camera.updateMatrixWorld(true)
+    const t = layer.transform
+    const topLeft = new Vector3(t.x - t.width / 2, t.y + t.height / 2, t.z).project(camera)
+    const bottomRight = new Vector3(t.x + t.width / 2, t.y - t.height / 2, t.z).project(camera)
+    expect((topLeft.x + 1) * 1920 / 2).toBeCloseTo(rect.x, 9)
+    expect((1 - topLeft.y) * 1080 / 2).toBeCloseTo(rect.y, 9)
+    expect((bottomRight.x + 1) * 1920 / 2).toBeCloseTo(rect.x + rect.width, 9)
+    expect((1 - bottomRight.y) * 1080 / 2).toBeCloseTo(rect.y + rect.height, 9)
+  }
+})
+
+test('invalid 2D edits are rejected before changing the authoring data', async () => {
+  const { setFrontRect } = await import('../src/model.ts')
+  const [layer, , ground] = initialLayers(defaultSettings), before = copy(layer)
+  for (const patch of [{ x: NaN }, { y: Infinity }, { width: 0 }, { height: -1 }]) {
+    expect(() => setFrontRect(layer, { ...layer.placement.rectPx, ...patch })).toThrow()
+    expect(copy(layer)).toEqual(before)
+  }
+  expect(() => setFrontRect(ground, { x: 0, y: 0, width: 1920, height: 1080 })).toThrow()
+})

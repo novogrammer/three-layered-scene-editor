@@ -5,7 +5,7 @@ import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
+import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -232,6 +232,18 @@ function renderPanel() {
   mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; sync() }
   modeLabel.append(mode); panel.append(modeLabel)
   if (layer.orientation.relation === 'parallel') {
+    const title = document.createElement('h2'); title.textContent = '2D配置 · px'
+    title.title = '基準カメラから見た矩形。共通キャンバスの左上が原点で、Xは右、Yは下が正です。'
+    panel.append(title)
+    const rectFields = document.createElement('div'); rectFields.className = 'pair'; panel.append(rectFields)
+    if (layer.placement.type !== 'screen') throw new Error('正面レイヤーの配置方式が一致していません。')
+    const rect = layer.placement.rectPx
+    for (const [key, label] of [['x', 'X'], ['y', 'Y'], ['width', '幅'], ['height', '高さ']] as const) {
+      const input = numberField(rectFields, label, rect[key], value => {
+        replaceLayer(setFrontRect(layer, { ...rect, [key]: value }))
+      }, key === 'width' || key === 'height' ? 0 : -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
+      input.setAttribute('aria-label', `2D配置 ${label} px`)
+    }
     const label = document.createElement('label'); label.textContent = 'Z変更時の配置'
     const select = document.createElement('select')
     select.innerHTML = '<option value="screen">2D配置を保持</option><option value="world">3D配置を保持</option>'

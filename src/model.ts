@@ -186,6 +186,15 @@ export function moveOrigin(layer: Layer, x: number, y: number): Layer {
   return result
 }
 
+/** Edit the screen-space rectangle directly, retaining its input precision and depth. */
+export function setFrontRect(layer: Layer, rect: Rect): Layer {
+  if (layer.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
+  placeFront(configurations.get(layer)!, rect, layer.transform.z)
+  const result = cloneLayer(layer)
+  ;(result.placement as Extract<Placement, { type: 'screen' }>).rectPx = { ...rect }
+  return result
+}
+
 export function setFrontDepth(layer: Layer, z: number, preserveScreen: boolean) {
   const result = cloneLayer(layer)
   if (result.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
