@@ -5,7 +5,7 @@ import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
+import { changeOrientation, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
 import type { Layer, PlacementUnit, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -15,7 +15,6 @@ let layers = initialLayers(settings)
 let selectedId: string | null = layers[0]?.id ?? null
 let adding = false
 let depthMode = 'screen'
-let surfaceUnit: PlacementUnit = 'scene'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
 interface LayerAsset { image: HTMLImageElement; texture: THREE.Texture; name: string }
@@ -146,6 +145,7 @@ function coordinateHint(parent: HTMLElement, text: string, id: string, inputs: H
 function renderPanel() {
   const layer = layers.find(layer => layer.id === selectedId)
   const panel = get('layer-panel')
+  const expanded3D = panel.querySelector<HTMLDetailsElement>('details[data-placement-3d]')?.open ?? false
   panel.replaceChildren()
   panel.hidden = !layer
   if (!layer) return
@@ -232,94 +232,87 @@ function renderPanel() {
   mode.value = layer.alphaMode
   mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; sync() }
   modeLabel.append(mode); panel.append(modeLabel)
-  const surfaceValues = layer.orientation.relation === 'perpendicular' ? surfacePlacementValues(layer, surfaceUnit) : null
-  const pixelSurface = surfaceValues !== null && surfaceUnit === 'px'
-  const inputScale = pixelSurface ? 1 / referenceMetrics(settings).scale : 1
-  if (surfaceValues) {
-    const unitLabel = document.createElement('label'); unitLabel.textContent = '配置の単位'
-    const unit = document.createElement('select')
-    unit.innerHTML = '<option value="px">px相当</option><option value="scene">シーン単位</option>'
-    unit.value = surfaceUnit
-    unit.onchange = () => { surfaceUnit = unit.value as PlacementUnit; renderPanel() }
-    unitLabel.append(unit); panel.append(unitLabel)
-  }
-  if (layer.orientation.relation === 'parallel') {
-    const title = document.createElement('h2'); title.textContent = '2D配置 · px'
-    title.title = '基準カメラから見た矩形。共通キャンバスの左上が原点で、Xは右、Yは下が正です。'
-    panel.append(title)
-    const rectFields = document.createElement('div'); rectFields.className = 'pair'; panel.append(rectFields)
-    if (layer.placement.type !== 'screen') throw new Error('正面レイヤーの配置方式が一致していません。')
-    const rect = layer.placement.rectPx
-    for (const [key, label] of [['x', 'X'], ['y', 'Y'], ['width', '幅'], ['height', '高さ']] as const) {
-      const input = numberField(rectFields, label, rect[key], value => {
-        replaceLayer(setFrontRect(layer, { ...rect, [key]: value }))
-      }, key === 'width' || key === 'height' ? 0 : -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)
-      input.setAttribute('aria-label', `2D配置 ${label} px`)
-    }
-    const label = document.createElement('label'); label.textContent = 'Z変更時の配置'
-    const select = document.createElement('select')
-    select.innerHTML = '<option value="screen">2D配置を保持</option><option value="world">3D配置を保持</option>'
-    select.title = '2D配置の保持は、基準カメラから見た位置とサイズを維持します。'; select.value = depthMode; select.onchange = () => { depthMode = select.value }
-    label.append(select); panel.append(label)
-    const metrics = referenceMetrics(settings)
-    const zInput = numberField(panel, '奥行きZ', layer.transform.z, (z) => {
-      if (z >= metrics.cameraZ - metrics.near) throw new Error('カメラより奥へ配置してください。')
-      replaceLayer(setFrontDepth(layer, z, depthMode === 'screen'))
-    }, -500, metrics.cameraZ - metrics.near - 0.001)
-    coordinateHint(zInput.parentElement!, '基準面 Z = 0', 'reference-z-coordinate', [zInput])
-    const details = document.createElement('details')
-    const summary = document.createElement('summary'); summary.textContent = '3D配置'
-    details.append(summary); panel.append(details)
-    for (const [key, label] of [['x', '位置X'], ['y', '位置Y'], ['width', '幅'], ['height', '高さ']] as const) {
-      numberField(details, label, layer.transform[key], (value) => {
-        layer.transform[key] = value
-      }, key === 'width' || key === 'height' ? 0.01 : -500, 500)
-    }
-  } else {
-    const grid = document.createElement('div'); grid.className = 'pair'; panel.append(grid)
-    const wall = isWall(layer)
-    const fields = [['center', wall ? '中心Y' : '中心X'], ['size', wall ? '高さ' : '幅']] as const
-    for (const [key, label] of fields) {
-      numberField(grid, label, surfaceValues![key], value => {
-        replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, key, value))
-      }, (key === 'size' ? 0.01 : -500) * inputScale, 500 * inputScale)
-    }
-    const frontInput = numberField(grid, '手前端Z', surfaceValues!.frontZ, value => {
-      replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, 'frontZ', value))
-    }, -1000 * inputScale, 1000 * inputScale)
-    const backInput = numberField(grid, '奥端Z', surfaceValues!.backZ, value => {
-      replaceLayer(setSurfacePlacementValue(layer, surfaceUnit, 'backZ', value))
-    }, -1000 * inputScale, 1000 * inputScale)
-    coordinateHint(grid, '基準面 Z = 0', 'reference-z-coordinate', [frontInput, backInput])
-
-  }
-  const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点'; originTitle.title = '基準点を動かすと、面も同じ量だけ移動します。'
-  panel.append(originTitle)
   const metrics = referenceMetrics(settings)
-  const referenceWidth = pixelSurface ? settings.width : metrics.width
-  const referenceHeight = pixelSurface ? settings.height : metrics.height
-  const edges = {
-    down: ['下端', 'y', -referenceHeight / 2],
-    up: ['上端', 'y', referenceHeight / 2],
-    left: ['左端', 'x', -referenceWidth / 2],
-    right: ['右端', 'x', referenceWidth / 2],
-  } as const
-  const edge = layer.orientation.relation === 'perpendicular' ? edges[layer.orientation.direction] : null
-  const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
-  const originInputs: HTMLInputElement[] = []
-  for (const key of ['x', 'y'] as const) {
-    const field = key === 'x' ? 'originX' : 'originY'
-    const originInput = numberField(originFields, key.toUpperCase(), surfaceValues ? surfaceValues[field] : layer.origin[key], value => {
-      replaceLayer(surfaceValues ? setSurfacePlacementValue(layer, surfaceUnit, field, value)
-        : moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y))
-    }, -500 * inputScale, 500 * inputScale)
-    originInput.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()}`)
-    originInputs.push(originInput)
+  const parallel = layer.orientation.relation === 'parallel'
+
+  function placementFields(parent: HTMLElement, unit: PlacementUnit) {
+    const px = unit === 'px', factor = px ? 1 / metrics.scale : 1
+    const grid = document.createElement('div'); grid.className = 'pair'; parent.append(grid)
+    if (parallel) {
+      if (layer!.placement.type !== 'screen') throw new Error('正面レイヤーの配置方式が一致していません。')
+      const rect = layer!.placement.rectPx
+      for (const [key, name] of [['x', px ? 'X' : '位置X'], ['y', px ? 'Y' : '位置Y'], ['width', '幅'], ['height', '高さ']] as const) {
+        const input = numberField(grid, name, px ? rect[key] : layer!.transform[key], value => {
+          if (px) replaceLayer(setFrontRect(layer!, { ...rect, [key]: value }))
+          else layer!.transform[key] = value
+        }, key === 'width' || key === 'height' ? (px ? 0 : 0.01) : (px ? -Number.MAX_SAFE_INTEGER : -500),
+        px ? Number.MAX_SAFE_INTEGER : 500)
+        input.setAttribute('aria-label', `${px ? '2D配置' : '3D配置'} ${name} ${px ? 'px' : 'シーン単位'}`)
+      }
+      if (px) {
+        const label = document.createElement('label'); label.textContent = 'Z変更時の配置'
+        const select = document.createElement('select')
+        select.innerHTML = '<option value="screen">2D配置を保持</option><option value="world">3D配置を保持</option>'
+        select.title = '2D配置の保持は、基準カメラから見た位置とサイズを維持します。'
+        select.value = depthMode; select.onchange = () => { depthMode = select.value }
+        label.append(select); parent.append(label)
+      }
+      const zInput = numberField(parent, '奥行きZ', px ? layer!.placement.zPx : layer!.transform.z, value => {
+        replaceLayer(px ? setFrontDepthPx(layer!, value, depthMode === 'screen') : setFrontDepth(layer!, value, depthMode === 'screen'))
+      }, -500 * factor, (metrics.cameraZ - metrics.near - 0.001) * factor)
+      zInput.setAttribute('aria-label', `奥行きZ ${px ? 'px相当' : 'シーン単位'}`)
+      coordinateHint(zInput.parentElement!, '基準面 Z = 0', `reference-z-${unit}`, [zInput])
+    } else {
+      const values = surfacePlacementValues(layer!, unit), wall = isWall(layer!)
+      for (const [key, name] of [['center', wall ? '中心Y' : '中心X'], ['size', wall ? '高さ' : '幅'],
+        ['frontZ', '手前端Z'], ['backZ', '奥端Z']] as const) {
+        const depth = key === 'frontZ' || key === 'backZ'
+        const input = numberField(grid, name, values[key], value => {
+          replaceLayer(setSurfacePlacementValue(layer!, unit, key, value))
+        }, (key === 'size' ? 0.01 : depth ? -1000 : -500) * factor, (depth ? 1000 : 500) * factor)
+        input.setAttribute('aria-label', `${name} ${px ? 'px相当' : 'シーン単位'}`)
+      }
+      const depthInputs = [...grid.querySelectorAll<HTMLInputElement>('input')].slice(2)
+      coordinateHint(grid, '基準面 Z = 0', `reference-z-${unit}`, depthInputs)
+    }
   }
-  if (edge) {
-    coordinateHint(originFields, `基準面の${edge[0]} ${edge[1].toUpperCase()} = ${Number(edge[2].toFixed(4))}`,
-      'origin-edge-coordinate', originInputs)
+
+  function originFields(parent: HTMLElement, unit: PlacementUnit) {
+    const px = unit === 'px', factor = px ? 1 / metrics.scale : 1
+    const title = document.createElement('h2'); title.textContent = px ? '配置基準点 · px' : '配置基準点'
+    title.title = '基準点を動かすと、面も同じ量だけ移動します。Zは0です。'
+    parent.append(title)
+    const grid = document.createElement('div'); grid.className = 'pair'; parent.append(grid)
+    const inputs: HTMLInputElement[] = []
+    for (const key of ['x', 'y'] as const) {
+      const input = numberField(grid, key.toUpperCase(), px ? layer!.originPx[key] : layer!.origin[key], value => {
+        replaceLayer(px ? moveOriginPx(layer!, key === 'x' ? value : layer!.originPx.x, key === 'y' ? value : layer!.originPx.y)
+          : moveOrigin(layer!, key === 'x' ? value : layer!.origin.x, key === 'y' ? value : layer!.origin.y))
+      }, -500 * factor, 500 * factor)
+      input.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()} ${px ? 'px相当' : 'シーン単位'}`)
+      inputs.push(input)
+    }
+    if (layer!.orientation.relation === 'perpendicular') {
+      const width = px ? settings.width : metrics.width, height = px ? settings.height : metrics.height
+      const edges = { down: ['下端', 'Y', -height / 2], up: ['上端', 'Y', height / 2],
+        left: ['左端', 'X', -width / 2], right: ['右端', 'X', width / 2] } as const
+      const [edge, axis, value] = edges[layer!.orientation.direction]
+      coordinateHint(grid, `基準面の${edge} ${axis} = ${Number(value.toFixed(4))}`, `origin-edge-${unit}`, inputs)
+    }
   }
+
+  const placementTitle = document.createElement('h2'); placementTitle.textContent = '配置 · px'
+  placementTitle.title = parallel
+    ? 'X・Y・幅・高さは基準カメラから見た矩形。左上が原点で、Xは右、Yは下が正。Zは基準面の縮尺によるpx相当値です。'
+    : '基準面の縮尺によるpx相当値。基準面中央が原点で、Xは右、Yは上、Zはカメラ側が正です。'
+  panel.append(placementTitle)
+  placementFields(panel, 'px')
+  originFields(panel, 'px')
+  const details = document.createElement('details'); details.setAttribute('data-placement-3d', ''); details.open = expanded3D
+  const summary = document.createElement('summary'); summary.textContent = '3D配置'; summary.title = 'シーン単位で編集'
+  details.append(summary); panel.append(details)
+  placementFields(details, 'scene')
+  originFields(details, 'scene')
 
 }
 

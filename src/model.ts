@@ -214,7 +214,7 @@ export function moveOrigin(layer: Layer, x: number, y: number): Layer {
     y === layer.origin.y ? layer.originPx.y : y / scale)
 }
 
-function moveOriginPx(layer: Layer, x: number, y: number): Layer {
+export function moveOriginPx(layer: Layer, x: number, y: number): Layer {
   assertFinite(x, y)
   const result = cloneLayer(layer)
   const dx = x - layer.originPx.x, dy = y - layer.originPx.y
@@ -238,13 +238,20 @@ export function setFrontRect(layer: Layer, rect: Rect): Layer {
 }
 
 export function setFrontDepth(layer: Layer, z: number, preserveScreen: boolean) {
+  if (layer.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
+  return setFrontDepthPx(layer, z === layer.transform.z ? layer.placement.zPx : z / layerScale(layer), preserveScreen)
+}
+
+export function setFrontDepthPx(layer: Layer, zPx: number, preserveScreen: boolean): Layer {
+  if (layer.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
+  assertFinite(zPx)
+  const config = configurations.get(layer)!, z = zPx * layerScale(layer)
+  placeFront(config, layer.placement.rectPx, z)
   const result = cloneLayer(layer)
-  if (result.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
-  const config = configurations.get(layer)!
-  placeFront(config, result.placement.rectPx, z)
-  if (z === layer.transform.z) return result
-  if (preserveScreen) result.placement.zPx = z / layerScale(layer)
-  else result.transform.z = z
+  if (zPx === layer.placement.zPx) return result
+  const p = result.placement as Extract<Placement, { type: 'screen' }>
+  if (!preserveScreen) p.rectPx = frontRect(config, { ...layer.transform, z })
+  p.zPx = zPx
   return result
 }
 

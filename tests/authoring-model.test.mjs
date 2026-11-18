@@ -150,3 +150,34 @@ test('invalid 2D edits are rejected before changing the authoring data', async (
   }
   expect(() => setFrontRect(ground, { x: 0, y: 0, width: 1920, height: 1080 })).toThrow()
 })
+
+test('pixel depth inputs retain their exact value in both screen and world preserving modes', async () => {
+  const { setFrontDepthPx } = await import('../src/model.ts')
+  const layer = initialLayers(defaultSettings)[0], before = copy(layer), zPx = -1234.1234567890123
+  const scale = referenceMetrics(defaultSettings).scale
+  for (const screen of [true, false]) {
+    const edited = setFrontDepthPx(layer, zPx, screen)
+    expect(edited.placement.zPx).toBe(zPx)
+    expect(edited.originPx).toEqual(layer.originPx)
+    if (screen) expect(edited.placement.rectPx).toEqual(layer.placement.rectPx)
+    else closeTransform(edited.transform, { ...layer.transform, z: zPx * scale })
+    expect(edited.transform.z).toBeCloseTo(zPx * scale, 10)
+  }
+  expect(() => setFrontDepthPx(layer, 10000, true)).toThrow()
+  expect(copy(layer)).toEqual(before)
+})
+
+test('pixel origin input retains precision while moving a parallel plane with its origin', async () => {
+  const { moveOriginPx } = await import('../src/model.ts')
+  const layer = initialLayers(defaultSettings)[0], before = copy(layer)
+  const x = 123.1234567890123, y = -321.9876543210987, scale = referenceMetrics(defaultSettings).scale
+  const edited = moveOriginPx(layer, x, y)
+  expect(edited.originPx).toEqual({ x, y, z: 0 })
+  expect(edited.transform.x - layer.transform.x).toBeCloseTo(x * scale, 10)
+  expect(edited.transform.y - layer.transform.y).toBeCloseTo(y * scale, 10)
+  expect(edited.placement.zPx).toBe(layer.placement.zPx)
+  expect(edited.placement.rectPx.width).toBe(layer.placement.rectPx.width)
+  expect(edited.placement.rectPx.height).toBe(layer.placement.rectPx.height)
+  expect(() => moveOriginPx(layer, NaN, y)).toThrow()
+  expect(copy(layer)).toEqual(before)
+})
