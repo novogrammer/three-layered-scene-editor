@@ -1,6 +1,6 @@
 import { Color, MeshBasicNodeMaterial, Vector2 } from 'three/webgpu'
-import type { Matrix4, Texture } from 'three/webgpu'
-import { Fn, If, clamp, float, fract, max, mix, positionWorld, screenCoordinate, step, texture, uniform, uv, vec3, vec4 } from 'three/tsl'
+import type { Matrix4, Node, Texture } from 'three/webgpu'
+import { Fn, If, clamp, context, float, fract, materialReference, max, mix, positionWorld, screenCoordinate, step, uniform, uv, vec3, vec4 } from 'three/tsl'
 
 /** Backend-independent projection; the reference matrix uses WebGL's -1..1 clip Z. */
 export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, projected: boolean) {
@@ -12,8 +12,9 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
     imageUvScale: uniform(new Vector2(1, 1)),
     imageUvOffset: uniform(new Vector2(0, 0)),
   }
-  const imageNode = texture(image)
-  const material = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false })
+  const material = new MeshBasicNodeMaterial({ map: image, transparent: true, depthWrite: false })
+  // @types/three leaves material references untyped; a sampled 2D map yields vec4.
+  const mapNode = materialReference('map', 'texture', material) as ReturnType<typeof materialReference> & Node<'vec4'>
   material.colorNode = Fn(() => {
     const { projectedUV, valid } = projected ? (() => {
       // Perpendicular surfaces need perspective division per fragment.
@@ -28,7 +29,7 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
       .and(projectedUV.y.greaterThanEqual(0)).and(projectedUV.y.lessThanEqual(1))
     // Frame diagnostics use unmodified frame UVs. Cover and edge extension apply to sampling only.
     const imageUV = projectedUV.mul(uniforms.imageUvScale).add(uniforms.imageUvOffset)
-    const sample = imageNode.sample(clamp(imageUV, 0, 1)).toVar()
+    const sample = context(mapNode, { getUV: () => clamp(imageUV, 0, 1) }).toVar()
     const result = vec4(sample).toVar()
 
     If(uniforms.diagnosticMode.equal(2), () => {
@@ -46,5 +47,5 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
     })
     return result
   })()
-  return { material, uniforms, imageNode, projected }
+  return { material, uniforms, mapNode, projected }
 }

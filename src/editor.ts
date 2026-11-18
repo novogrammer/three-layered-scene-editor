@@ -5,6 +5,7 @@ import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
 import { centeredCover } from './image-fit'
+import { configureProjectionCamera } from './projection-camera'
 import { reconcileLayerViews, replaceLayerViews } from './layer-views'
 import { layerRenderSort } from './render-order'
 import type { ImageDimensions } from './image-fit'
@@ -147,19 +148,7 @@ export class Editor {
     this.settings = settings
     this.layers = layers
     const metrics = referenceMetrics(settings)
-    // Projection UVs deliberately retain the same -1..1 convention on either backend.
-    this.baseCamera.coordinateSystem = THREE.WebGLCoordinateSystem
-    this.baseCamera.fov = settings.fov
-    this.baseCamera.aspect = metrics.aspect
-    this.baseCamera.near = metrics.near
-    // Fit the clip range to the current scene rather than image pixel dimensions.
-    const extent = Math.max(0, ...layers.map(({ transform: t }) =>
-      Math.hypot(t.x, t.y, t.z) + Math.hypot(t.width, t.height)))
-    this.baseCamera.far = Math.max(metrics.cameraZ * 2, metrics.cameraZ + extent * 2)
-    this.baseCamera.position.set(0, 0, metrics.cameraZ)
-    this.baseCamera.rotation.set(0, 0, 0)
-    this.baseCamera.updateProjectionMatrix()
-    this.baseCamera.updateMatrixWorld(true)
+    configureProjectionCamera(this.baseCamera, settings, layers)
     this.projectionMatrix.multiplyMatrices(this.baseCamera.projectionMatrix, this.baseCamera.matrixWorldInverse)
     this.reference.scale.set(metrics.width, metrics.height, 1)
     // A camera helper reaching all the way to far obscures the useful working area.
@@ -176,14 +165,13 @@ export class Editor {
       const { root, mesh, outline } = view
       mesh.userData.layerListIndex = index
       applyLayerTransform(root, mesh, layer)
-      view.surface.imageNode.value = textures.get(layer.id)!
+      const image = textures.get(layer.id)!
       const projected = usesProjection(layer)
       if (view.surface.projected !== projected) {
-        const image = view.surface.imageNode.value
         view.surface.material.dispose()
         view.surface = surfaceMaterial(image, this.projectionMatrix, layer.editorColor, projected)
         mesh.material = view.surface.material
-      }
+      } else view.surface.material.map = image
       if (!projected) {
         view.surface.uniforms.projectionValid.value = updateProjectedUVs(mesh.geometry, mesh.matrixWorld, this.projectionMatrix)
       }
@@ -222,7 +210,7 @@ export class Editor {
   }
 
   private updateImageFit(surface: LayerView['surface']) {
-    const image = surface.imageNode.value.image as ImageDimensions
+    const image = surface.material.map!.image as ImageDimensions
     const { uv } = centeredCover({ width: image.width, height: image.height }, this.settings)
     surface.uniforms.imageUvScale.value.set(uv.scaleX, uv.scaleY)
     surface.uniforms.imageUvOffset.value.set(uv.offsetX, uv.offsetY)

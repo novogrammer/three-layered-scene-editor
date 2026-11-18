@@ -4,6 +4,7 @@ import { Editor } from './editor'
 import { loadDemoImages } from './demo'
 import { createSceneDocument } from './scene-json'
 import { MAX_SCENE_JSON_BYTES, prepareSceneImport } from './scene-import'
+import { createSceneGlb } from './scene-glb'
 import type { ImageSource } from './scene-json'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
@@ -19,6 +20,7 @@ let selectedId: string | null = layers[0]?.id ?? null
 let adding = false
 let saving = false
 let loading = false
+let exportingGlb = false
 let sceneRevision = 0
 let depthMode = 'screen'
 let alive = true
@@ -475,6 +477,29 @@ async function saveJson() {
   }
 }
 
+async function exportGlb() {
+  if (exportingGlb) return
+  exportingGlb = true
+  const button = get<HTMLButtonElement>('export-glb'); button.disabled = true
+  status('GLBを作成中…')
+  try {
+    const data = await createSceneGlb(settings, layers, assets)
+    if (!alive) return
+    const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }))
+    try {
+      const link = document.createElement('a'); link.href = url; link.download = 'three-layered-scene.glb'
+      document.body.append(link)
+      try { link.click() } finally { link.remove() }
+      status('GLBを書き出しました。')
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000) }
+  } catch (error) {
+    if (alive) status(error instanceof Error ? error.message : 'GLBを書き出せませんでした。', true)
+  } finally {
+    exportingGlb = false
+    if (alive) button.disabled = false
+  }
+}
+
 let maxTextureSize = 8192
 let stageObserver: ResizeObserver | undefined
 
@@ -506,6 +531,7 @@ async function start() {
     inputs.forEach((element) => { element.disabled = false })
     maxTextureSize = editor.maxTextureSize
     get('save-json').onclick = () => { void saveJson() }
+    get('export-glb').onclick = () => { void exportGlb() }
     const loadInput = get<HTMLInputElement>('load-json-file')
     get('load-json').onclick = () => { loadInput.value = ''; loadInput.click() }
     loadInput.onchange = () => { const file = loadInput.files?.[0]; if (file) void loadJson(file) }
