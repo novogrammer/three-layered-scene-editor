@@ -1,26 +1,36 @@
 import type { LayerData, SceneSettings } from './model'
+import type { ImageAssetV1, SceneDocumentV1, SceneLayerV1 } from './scene-document'
 
 export interface ImageSource {
   fileName: string
   blob: Blob
 }
 
-type SavedPlacement =
-  | { type: 'screen'; rectPx: { x: number; y: number; width: number; height: number }; zPx: number }
-  | { type: 'surface'; centerXPx: number; widthPx: number; frontZPx: number; backZPx: number }
-  | { type: 'surface'; centerYPx: number; heightPx: number; frontZPx: number; backZPx: number }
-
-function savedPlacement(layer: LayerData): SavedPlacement {
+function savedLayer(layer: LayerData): SceneLayerV1 {
+  const common = {
+    id: layer.id, name: layer.name, imageId: `image-${layer.id}`,
+    visible: layer.visible, editorColor: layer.editorColor, alphaMode: layer.alphaMode,
+    originPx: { ...layer.originPx },
+  }
   const p = layer.placement
-  if (p.type === 'screen') return { type: 'screen', rectPx: { ...p.rectPx }, zPx: p.zPx }
+  if (p.type === 'screen') {
+    if (layer.orientation.relation !== 'parallel') throw new Error('面の向きと配置方式が一致していません。')
+    return { ...common, orientation: { relation: 'parallel', direction: 'front' },
+      placement: { type: 'screen', rectPx: { ...p.rectPx }, zPx: p.zPx } }
+  }
+  if (layer.orientation.relation !== 'perpendicular') throw new Error('面の向きと配置方式が一致していません。')
+  const direction = layer.orientation.direction
   const depth = { frontZPx: p.frontZPx, backZPx: p.backZPx }
-  return layer.orientation.direction === 'left' || layer.orientation.direction === 'right'
-    ? { type: 'surface', centerYPx: p.centerPx, heightPx: p.sizePx, ...depth }
-    : { type: 'surface', centerXPx: p.centerPx, widthPx: p.sizePx, ...depth }
+  return direction === 'left' || direction === 'right'
+    ? { ...common, orientation: { relation: 'perpendicular', direction },
+      placement: { type: 'surface', centerYPx: p.centerPx, heightPx: p.sizePx, ...depth } }
+    : { ...common, orientation: { relation: 'perpendicular', direction },
+      placement: { type: 'surface', centerXPx: p.centerPx, widthPx: p.sizePx, ...depth } }
 }
 
-async function imageDataUrl(blob: Blob): Promise<string> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type) || !blob.size) {
+async function encodeImage(blob: Blob): Promise<Pick<ImageAssetV1, 'mimeType' | 'data'>> {
+  const mimeType = blob.type
+  if ((mimeType !== 'image/png' && mimeType !== 'image/jpeg' && mimeType !== 'image/webp') || !blob.size) {
     throw new Error('保存する画像の形式またはデータが不正です。')
   }
   const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -29,11 +39,11 @@ async function imageDataUrl(blob: Blob): Promise<string> {
   for (let offset = 0; offset < bytes.length; offset += 24576) {
     chunks.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + 24576))))
   }
-  return `data:${blob.type};base64,${chunks.join('')}`
+  return { mimeType, data: `data:${mimeType};base64,${chunks.join('')}` }
 }
 
 /** Capture the committed scene and source files before any asynchronous image encoding. */
-export async function createSceneDocument(settings: SceneSettings, layers: readonly LayerData[], sources: ReadonlyMap<string, ImageSource>) {
+export async function createSceneDocument(settings: SceneSettings, layers: readonly LayerData[], sources: ReadonlyMap<string, ImageSource>): Promise<SceneDocumentV1> {
   const config = { ...settings }
   const snapshot = structuredClone(layers)
   const images = snapshot.map(layer => {
@@ -41,8 +51,8 @@ export async function createSceneDocument(settings: SceneSettings, layers: reado
     if (!source) throw new Error(`「${layer.name}」の元画像が見つかりません。`)
     return { id: `image-${layer.id}`, name: source.fileName, blob: source.blob }
   })
-  const assets = await Promise.all(images.map(async image => ({
-    id: image.id, name: image.name, mimeType: image.blob.type, data: await imageDataUrl(image.blob),
+  const assets: ImageAssetV1[] = await Promise.all(images.map(async image => ({
+    id: image.id, name: image.name, ...await encodeImage(image.blob),
   })))
   return {
     schemaVersion: 1,
@@ -50,11 +60,7 @@ export async function createSceneDocument(settings: SceneSettings, layers: reado
     referencePlane: { height: config.referenceHeight },
     projectionCamera: { fov: config.fov },
     projection: { imageFit: 'cover', imageAlign: 'center', outsideImage: 'clamp' },
-    layers: snapshot.map(layer => ({
-      id: layer.id, name: layer.name, imageId: `image-${layer.id}`,
-      visible: layer.visible, editorColor: layer.editorColor, alphaMode: layer.alphaMode,
-      orientation: { ...layer.orientation }, originPx: { ...layer.originPx }, placement: savedPlacement(layer),
-    })),
+    layers: snapshot.map(savedLayer),
     assets,
   }
 }

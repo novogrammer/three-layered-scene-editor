@@ -224,6 +224,8 @@ JSONを再編集の正本とし、GLBの再読み込みによる編集復元は�
 
 ### 保存形式v1（実装済み）
 
+保存形式専用のTypeScript型を`src/scene-document.ts`に定義する。文書全体は`SceneDocumentV1`、レイヤーは`SceneLayerV1`、画像は`ImageAssetV1`とし、編集モデルの型には依存させない。レイヤーの型は向きと配置形式の対応を表すunionとする。保存関数`createSceneDocument`の戻り値は`Promise<SceneDocumentV1>`とする。これはコンパイル時の型定義であり、外部JSONの実行時検証やJSON Schemaではない。
+
 画面上部の「JSON保存」から`three-layered-scene.json`をダウンロードする。画像を含む単一JSONとし、元画像は再圧縮せずData URLで埋め込む。自動保存は行わない。
 
 | 項目 | 保存内容 |
