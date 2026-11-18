@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene, Texture, Vector3 } from 'three/webgpu'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { restoreProjectionAsset, viewerRenderSort } from '../src/viewer.ts'
+import { parseProjectionGlb, restoreProjectionAsset, projectionRenderSort } from '../src/glb-viewer/index.ts'
 // Only the test harness imports the producer to exercise the real GLB contract.
 import { createSceneGlb } from '../src/scene-glb.ts'
 import { initialLayers, defaultSettings } from '../src/model.ts'
@@ -13,16 +13,23 @@ beforeAll(() => vi.stubGlobal('FileReader', class {
 }))
 afterAll(() => vi.unstubAllGlobals())
 
-async function exportedScene(settings = defaultSettings) {
+async function exportedBuffer(settings = defaultSettings) {
   const layers = initialLayers(settings)
   const bytes = await readFile(new URL('../public/samples/ground.png', import.meta.url))
   const sources = new Map(layers.map(layer => [layer.id, { fileName: 'image.png', blob: new Blob([bytes], { type: 'image/png' }), image: { width: 1920, height: 1080 } }]))
-  const buffer = await createSceneGlb(settings, layers, sources)
+  return createSceneGlb(settings, layers, sources)
+}
+
+function textureLoader() {
   const loader = new GLTFLoader()
   loader.register(() => ({ name: 'test-texture-decoding', loadTexture: () => {
     const texture = new Texture(); texture.flipY = false; return Promise.resolve(texture)
   } }))
-  return (await loader.parseAsync(buffer, '')).scene
+  return loader
+}
+
+async function exportedScene(settings = defaultSettings) {
+  return (await textureLoader().parseAsync(await exportedBuffer(settings), '')).scene
 }
 
 function fixture() {
@@ -43,11 +50,14 @@ function fixture() {
   return scene
 }
 
-test('viewer imports only Three.js and no editor module, including type imports', async () => {
-  const source = await readFile(new URL('../src/viewer.ts', import.meta.url), 'utf8')
-  const imports = [...source.matchAll(/(?:from\s+|import\s*\()(['"])([^'"]+)\1/g)].map(match => match[2])
-  expect(imports.length).toBeGreaterThan(0)
-  expect(imports.every(name => name === 'three' || name.startsWith('three/'))).toBe(true)
+test('portable modules depend only on Three.js and their own directory, without DOM or viewer UI', async () => {
+  const directory = new URL('../src/glb-viewer/', import.meta.url)
+  for (const file of await readdir(directory)) {
+    const source = await readFile(new URL(file, directory), 'utf8')
+    const imports = [...source.matchAll(/(?:from\s+|import\s*\()(['"])([^'"]+)\1/g)].map(match => match[2])
+    expect(imports.every(name => name === 'three' || name.startsWith('three/') || /^\.\/[^/]+$/.test(name)), file).toBe(true)
+    expect(source, file).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver)\b|import\.meta/)
+  }
 })
 
 test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('restores actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
@@ -135,8 +145,76 @@ test('disposal restores original materials and leaves borrowed textures alive', 
 test('sorting uses depth first and published list order only at equal depth', () => {
   const scene = fixture(), a = { id: 2, groupOrder: 0, renderOrder: 0, z: 0.5, object: scene.children[1] }
   const b = { ...a, id: 1, object: scene.children[2] }
-  expect([b, a].sort(viewerRenderSort(true))).toEqual([a, b])
+  expect([b, a].sort(projectionRenderSort(true))).toEqual([a, b])
   b.z = 0.7
-  expect([a, b].sort(viewerRenderSort(true))).toEqual([b, a])
-  expect([b, a].sort(viewerRenderSort(false))).toEqual([a, b])
+  expect([a, b].sort(projectionRenderSort(true))).toEqual([b, a])
+  expect([b, a].sort(projectionRenderSort(false))).toEqual([a, b])
+})
+
+function glbHeader() {
+  const data = new ArrayBuffer(12), view = new DataView(data)
+  view.setUint32(0, 0x46546c67, true); view.setUint32(4, 2, true); view.setUint32(8, data.byteLength, true)
+  return data
+}
+
+test('buffer API loads and applies TSL without any renderer, DOM or viewer state', async () => {
+  const scene = fixture(), loader = { parseAsync: vi.fn(async () => ({ scene })) }
+  const asset = await parseProjectionGlb(glbHeader(), { loader })
+  const parent = new Scene(); parent.add(asset.scene)
+  const texture = asset.bindings[0].original.map
+  const textureDispose = vi.spyOn(texture, 'dispose')
+  const geometryDispose = vi.spyOn(asset.bindings[0].mesh.geometry, 'dispose')
+  const originalDispose = vi.spyOn(asset.bindings[0].original, 'dispose')
+  const generatedDispose = vi.spyOn(asset.bindings[0].projected, 'dispose')
+  expect(loader.parseAsync).toHaveBeenCalledWith(expect.any(ArrayBuffer), '')
+  asset.bindings.forEach(binding => expect(binding.mesh.material).toBe(binding.projected))
+  asset.setMode('standard'); asset.setMode('tsl')
+  asset.dispose(); asset.dispose()
+  expect(asset.scene.parent).toBeNull()
+  expect(textureDispose).toHaveBeenCalledOnce(); expect(geometryDispose).toHaveBeenCalledOnce()
+  expect(originalDispose).toHaveBeenCalledOnce(); expect(generatedDispose).toHaveBeenCalledOnce()
+  expect(() => asset.setMode('tsl')).toThrow('解放済み')
+  expect(() => asset.updateProjection()).toThrow('解放済み')
+})
+
+test('buffer API cleans loaded resources when extras validation fails', async () => {
+  const scene = fixture(), loader = { parseAsync: vi.fn(async () => ({ scene })) }
+  const meshes = scene.children.filter(object => object.isMesh)
+  const disposals = meshes.flatMap(mesh => [vi.spyOn(mesh.material, 'dispose'), vi.spyOn(mesh.material.map, 'dispose'), vi.spyOn(mesh.geometry, 'dispose')])
+  scene.userData[key].version = 99
+  await expect(parseProjectionGlb(glbHeader(), { loader })).rejects.toThrow('未対応')
+  disposals.forEach(dispose => expect(dispose).toHaveBeenCalledOnce())
+})
+
+test('buffer API rejects invalid headers before starting a loader', async () => {
+  const loader = { parseAsync: vi.fn() }
+  for (const data of [new ArrayBuffer(0), new ArrayBuffer(12)]) await expect(parseProjectionGlb(data, { loader })).rejects.toThrow('GLB')
+  const invalidVersion = glbHeader(); new DataView(invalidVersion).setUint32(4, 1, true)
+  await expect(parseProjectionGlb(invalidVersion, { loader })).rejects.toThrow('GLB')
+  expect(loader.parseAsync).not.toHaveBeenCalled()
+})
+
+test('borrowed-scene disposal is idempotent and never frees caller-owned resources', () => {
+  const scene = fixture(), parent = new Scene(); parent.add(scene)
+  const asset = restoreProjectionAsset(scene)
+  const mesh = asset.bindings[0].mesh
+  const originalDispose = vi.spyOn(asset.bindings[0].original, 'dispose'), geometryDispose = vi.spyOn(mesh.geometry, 'dispose')
+  const generatedDispose = vi.spyOn(asset.bindings[0].projected, 'dispose')
+  asset.setMode('tsl'); asset.dispose(); asset.dispose()
+  expect(scene.parent).toBe(parent)
+  expect(originalDispose).not.toHaveBeenCalled(); expect(geometryDispose).not.toHaveBeenCalled()
+  expect(generatedDispose).toHaveBeenCalledOnce()
+})
+
+
+test('public buffer API consumes a real producer GLB with a configured Three.js loader', async () => {
+  const asset = await parseProjectionGlb(await exportedBuffer(), { loader: textureLoader() })
+  try {
+    expect(asset.bindings).toHaveLength(3)
+    expect(asset.composition).toEqual({ width: 1920, height: 1080 })
+    expect(asset.camera.userData[key].role).toBe('projectionCamera')
+    asset.bindings.forEach(binding => expect(binding.mesh.material).toBe(binding.projected))
+    asset.updateProjection()
+    expect(asset.matrix.elements.every(Number.isFinite)).toBe(true)
+  } finally { asset.dispose() }
 })
