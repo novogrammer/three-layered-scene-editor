@@ -59,7 +59,10 @@ test('screen-preserving FOV changes retain front-layer projected bounds', () => 
 test('world-preserving FOV changes keep front-layer 3D transforms intact', () => {
   const layers = initialLayers(defaultSettings)
   const result = reconfigureScene(defaultSettings, { ...defaultSettings, fov: 65 }, layers, false)
-  expect(result.slice(0, 2)).toStrictEqual(layers.slice(0, 2))
+  for (let i = 0; i < 2; i++) {
+    for (const key of Object.keys(layers[i].transform)) close(result[i].transform[key], layers[i].transform[key])
+    expect(result[i].placement.rectPx).not.toEqual(layers[i].placement.rectPx)
+  }
   expect(result[0].transform).not.toBe(layers[0].transform)
 })
 

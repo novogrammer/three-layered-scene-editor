@@ -5,7 +5,7 @@ import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
+import { changeOrientation, defaultSettings, initialLayers, moveOrigin, setFrontDepth, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -240,9 +240,7 @@ function renderPanel() {
     const metrics = referenceMetrics(settings)
     const zInput = numberField(panel, '奥行きZ', layer.transform.z, (z) => {
       if (z >= metrics.cameraZ - metrics.near) throw new Error('カメラより奥へ配置してください。')
-      const rect = frontRect(settings, layer.transform)
-      layer.transform = depthMode === 'screen' ? placeFront(settings, rect, z) : { ...layer.transform, z }
-      layer.rect = frontRect(settings, layer.transform)
+      replaceLayer(setFrontDepth(layer, z, depthMode === 'screen'))
     }, -500, metrics.cameraZ - metrics.near - 0.001)
     coordinateHint(zInput.parentElement!, '基準面 Z = 0', 'reference-z-coordinate', [zInput])
     const details = document.createElement('details')
@@ -251,7 +249,6 @@ function renderPanel() {
     for (const [key, label] of [['x', '位置X'], ['y', '位置Y'], ['width', '幅'], ['height', '高さ']] as const) {
       numberField(details, label, layer.transform[key], (value) => {
         layer.transform[key] = value
-        layer.rect = frontRect(settings, layer.transform)
       }, key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
   } else {

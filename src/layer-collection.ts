@@ -1,4 +1,4 @@
-import { defaultOrigin, orientationFor, placeFront } from './model'
+import { createLayerModel, orientationFor } from './model'
 import type { Layer, SceneSettings } from './model'
 
 export const MAX_LAYERS = 9
@@ -8,11 +8,11 @@ export function createLayer(settings: SceneSettings, layers: Layer[], id: string
   if (layers.length >= MAX_LAYERS) throw new Error(`レイヤーは${MAX_LAYERS}枚まで追加できます。`)
   if (layers.some(layer => layer.id === id)) throw new Error('レイヤーIDが重複しています。')
   const rect = { x: 0, y: 0, width: settings.width, height: settings.height }
-  return {
-    id, name, orientation: orientationFor('front'), origin: defaultOrigin(settings, 'front'),
+  return createLayerModel(settings, {
+    id, name, orientation: orientationFor('front'), originPx: { x: 0, y: 0, z: 0 },
     editorColor: colors[layers.length % colors.length]!, visible: true, alphaMode: 'BLEND',
-    rect, depthRange: null, transform: placeFront(settings, rect, 0),
-  }
+    placement: { type: 'screen', rectPx: rect, zPx: 0 },
+  })
 }
 
 export function removeLayer(layers: Layer[], id: string, selectedId: string | null) {
