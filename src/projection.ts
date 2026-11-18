@@ -1,4 +1,4 @@
-import { Color, MeshBasicNodeMaterial } from 'three/webgpu'
+import { Color, MeshBasicNodeMaterial, Vector2 } from 'three/webgpu'
 import type { Matrix4, Texture } from 'three/webgpu'
 import { Fn, If, clamp, float, fract, max, mix, positionWorld, screenCoordinate, step, texture, uniform, uv, vec3, vec4 } from 'three/tsl'
 
@@ -9,6 +9,8 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
     diagnosticMode: uniform(0, 'int'),
     projectionValid: uniform(true),
     editorColor: uniform(new Color(color)),
+    imageUvScale: uniform(new Vector2(1, 1)),
+    imageUvOffset: uniform(new Vector2(0, 0)),
   }
   const imageNode = texture(image)
   const material = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false })
@@ -24,7 +26,9 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
     })() : { projectedUV: uv(), valid: uniforms.projectionValid }
     const inside = valid.and(projectedUV.x.greaterThanEqual(0)).and(projectedUV.x.lessThanEqual(1))
       .and(projectedUV.y.greaterThanEqual(0)).and(projectedUV.y.lessThanEqual(1))
-    const sample = imageNode.sample(clamp(projectedUV, 0, 1)).toVar()
+    // Frame diagnostics use unmodified frame UVs. Cover and edge extension apply to sampling only.
+    const imageUV = projectedUV.mul(uniforms.imageUvScale).add(uniforms.imageUvOffset)
+    const sample = imageNode.sample(clamp(imageUV, 0, 1)).toVar()
     const result = vec4(sample).toVar()
 
     If(uniforms.diagnosticMode.equal(2), () => {

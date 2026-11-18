@@ -7,7 +7,7 @@ test('different pixel resolutions with the same aspect need no notice', () => {
 
 test('a different aspect returns a nonblocking notice instead of throwing', () => {
   expect(imageAspectNotice({ width: 1080, height: 1920 }, { width: 1920, height: 1080 }))
-    .toContain('枠に合わせて伸縮')
+    .toContain('中央でトリミング')
 })
 
 test('rechecking the current settings adds and clears the image notice', () => {

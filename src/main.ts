@@ -3,6 +3,7 @@ import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
 import { imageAspectNotice } from './image-aspect'
+import { centeredCover } from './image-fit'
 import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
@@ -46,7 +47,10 @@ function compare() {
   ctx.fillStyle = '#17212a'
   ctx.fillRect(0, 0, source.width, source.height)
   for (const index of [0, 2, 1]) {
-    if (layers[index]!.visible) ctx.drawImage(images[index]!, 0, 0, source.width, source.height)
+    if (!layers[index]!.visible) continue
+    const image = images[index]!
+    const crop = centeredCover({ width: image.naturalWidth, height: image.naturalHeight }, settings).source
+    ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, source.width, source.height)
   }
 }
 

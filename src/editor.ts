@@ -4,6 +4,8 @@ import { surfaceMaterial } from './projection'
 import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
+import { centeredCover } from './image-fit'
+import type { ImageDimensions } from './image-fit'
 import type { Layer, SceneSettings } from './model'
 
 interface LayerView {
@@ -143,6 +145,7 @@ export class Editor {
       if (!projected) {
         view.surface.uniforms.projectionValid.value = updateProjectedUVs(mesh.geometry, mesh.matrixWorld, this.projectionMatrix)
       }
+      this.updateImageFit(view.surface)
       view.surface.uniforms.editorColor.value.set(layer.editorColor)
       ;(outline.material as THREE.LineBasicMaterial).color.set(layer.editorColor)
     })
@@ -178,7 +181,15 @@ export class Editor {
 
   setTexture(index: number, texture: THREE.Texture) {
     this.views[index]!.surface.imageNode.value = texture
+    this.updateImageFit(this.views[index]!.surface)
     this.requestRender()
+  }
+
+  private updateImageFit(surface: LayerView['surface']) {
+    const image = surface.imageNode.value.image as ImageDimensions
+    const { uv } = centeredCover({ width: image.width, height: image.height }, this.settings)
+    surface.uniforms.imageUvScale.value.set(uv.scaleX, uv.scaleY)
+    surface.uniforms.imageUvOffset.value.set(uv.offsetX, uv.offsetY)
   }
 
   setWorkView(view: string) {
