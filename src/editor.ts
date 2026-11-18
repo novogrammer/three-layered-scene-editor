@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { projectionMaterial } from './projection'
-import { referenceMetrics } from './model'
+import { surfaceMaterial } from './projection'
+import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
+import { updateProjectedUVs } from './projected-uv'
 import type { Layer, SceneSettings } from './model'
 
 interface LayerView {
@@ -10,7 +11,7 @@ interface LayerView {
   originMarker: THREE.AxesHelper
   mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicNodeMaterial>
   outline: THREE.LineSegments
-  projection: ReturnType<typeof projectionMaterial>
+  surface: ReturnType<typeof surfaceMaterial>
 }
 
 function makeRenderer(canvas: HTMLCanvasElement) {
@@ -67,15 +68,15 @@ export class Editor {
     this.cameraHelper = new THREE.CameraHelper(this.baseCamera)
     this.helpers.add(this.cameraHelper)
     this.views = layers.map((layer, index) => {
-      const projection = projectionMaterial(textures[index]!, this.projectionMatrix, layer.editorColor)
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), projection.material)
+      const surface = surfaceMaterial(textures[index]!, this.projectionMatrix, layer.editorColor, usesProjection(layer))
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), surface.material)
       const outline = this.makeOutline(layer.editorColor)
       const root = new THREE.Group()
       const originMarker = new THREE.AxesHelper(0.4)
       mesh.add(outline)
       root.add(mesh, originMarker)
       this.scene.add(root)
-      return { root, originMarker, mesh, outline, projection }
+      return { root, originMarker, mesh, outline, surface }
     })
     this.workCamera.position.set(13, 8, 16)
     this.controls = new OrbitControls(this.workCamera, workCanvas)
@@ -128,10 +129,21 @@ export class Editor {
     this.baseCamera.updateProjectionMatrix()
     this.workCamera.far = Math.max(1000, this.baseCamera.far * 2)
     this.workCamera.updateProjectionMatrix()
-    this.views.forEach(({ root, mesh, outline, projection }, i) => {
+    this.views.forEach((view, i) => {
+      const { root, mesh, outline } = view
       const layer = layers[i]!
       applyLayerTransform(root, mesh, layer)
-      projection.uniforms.editorColor.value.set(layer.editorColor)
+      const projected = usesProjection(layer)
+      if (view.surface.projected !== projected) {
+        const image = view.surface.imageNode.value
+        view.surface.material.dispose()
+        view.surface = surfaceMaterial(image, this.projectionMatrix, layer.editorColor, projected)
+        mesh.material = view.surface.material
+      }
+      if (!projected) {
+        view.surface.uniforms.projectionValid.value = updateProjectedUVs(mesh.geometry, mesh.matrixWorld, this.projectionMatrix)
+      }
+      view.surface.uniforms.editorColor.value.set(layer.editorColor)
       ;(outline.material as THREE.LineBasicMaterial).color.set(layer.editorColor)
     })
     this.requestRender()
@@ -165,7 +177,7 @@ export class Editor {
   }
 
   setTexture(index: number, texture: THREE.Texture) {
-    this.views[index]!.projection.imageNode.value = texture
+    this.views[index]!.surface.imageNode.value = texture
     this.requestRender()
   }
 
@@ -194,9 +206,9 @@ export class Editor {
 
   private prepareView(work: boolean) {
     this.helpers.visible = work
-    this.views.forEach(({ mesh, outline, originMarker, projection }, i) => {
+    this.views.forEach(({ mesh, outline, originMarker, surface }, i) => {
       const diagnostic = work ? this.diagnostic : 0
-      projection.uniforms.diagnosticMode.value = diagnostic
+      surface.uniforms.diagnosticMode.value = diagnostic
       outline.visible = work
       originMarker.visible = work
       ;(outline.material as THREE.LineBasicMaterial).opacity = i === this.selected ? 1 : 0.35

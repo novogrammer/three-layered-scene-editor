@@ -8,17 +8,27 @@ export interface SceneSettings {
 
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Transform { x: number; y: number; z: number; width: number; height: number }
-export type RotationPreset = 'front' | 'ground' | 'left-wall' | 'right-wall' | 'ceiling'
+export type PlaneDirection = 'front' | 'down' | 'up' | 'left' | 'right'
+export type PlaneOrientation =
+  | { relation: 'parallel'; direction: 'front' }
+  | { relation: 'perpendicular'; direction: 'down' | 'up' | 'left' | 'right' }
 export interface PlacementOrigin { x: number; y: number; z: 0 }
 export interface DepthRange { frontZ: number; backZ: number }
-export const rotationPresets: Record<RotationPreset, string> = {
-  front: '正面', ground: '地面', 'left-wall': '左壁', 'right-wall': '右壁', ceiling: '天井',
+export const planeDirections: Record<PlaneDirection, string> = {
+  front: '正面', down: '下（地面）', up: '上（天井）', left: '左（壁）', right: '右（壁）',
 }
+export const planeRelations = { parallel: '基準面に平行', perpendicular: '基準面に垂直' }
+
+export function orientationFor(direction: PlaneDirection): PlaneOrientation {
+  return direction === 'front' ? { relation: 'parallel', direction } : { relation: 'perpendicular', direction }
+}
+export function usesProjection(layer: Layer) { return layer.orientation.relation === 'perpendicular' }
+export function isWall(layer: Layer) { return layer.orientation.direction === 'left' || layer.orientation.direction === 'right' }
 export type AlphaMode = 'OPAQUE' | 'BLEND'
 export interface Layer {
   id: string
   name: string
-  kind: RotationPreset
+  orientation: PlaneOrientation
   origin: PlacementOrigin
   editorColor: string
   visible: boolean
@@ -40,13 +50,14 @@ export const defaultGroundTransform: Transform = {
 }
 
 export function setDepthRange(layer: Layer, frontZ: number, backZ: number): Layer {
-  if (layer.kind === 'front') throw new Error('正面レイヤーは奥行きZで配置してください。')
+  if (layer.orientation.relation === 'parallel') throw new Error('正面レイヤーは奥行きZで配置してください。')
   if (![frontZ, backZ].every(Number.isFinite) || frontZ <= backZ) {
     throw new Error('手前端Zは奥端Zより大きい有限の数値にしてください。')
   }
-  const depthAxis = layer.kind === 'left-wall' || layer.kind === 'right-wall' ? 'width' : 'height'
+  const depthAxis = isWall(layer) ? 'width' : 'height'
   return {
     ...layer,
+    orientation: { ...layer.orientation },
     origin: { ...layer.origin },
     rect: { ...layer.rect },
     depthRange: { frontZ, backZ },
@@ -54,22 +65,22 @@ export function setDepthRange(layer: Layer, frontZ: number, backZ: number): Laye
   }
 }
 
-export function defaultOrigin(settings: SceneSettings, preset: RotationPreset): PlacementOrigin {
+export function defaultOrigin(settings: SceneSettings, direction: PlaneDirection): PlacementOrigin {
   const metrics = referenceMetrics(settings)
   return {
-    x: preset === 'left-wall' ? -metrics.width / 2 : preset === 'right-wall' ? metrics.width / 2 : 0,
-    y: preset === 'ground' ? -metrics.height / 2 : preset === 'ceiling' ? metrics.height / 2 : 0,
+    x: direction === 'left' ? -metrics.width / 2 : direction === 'right' ? metrics.width / 2 : 0,
+    y: direction === 'down' ? -metrics.height / 2 : direction === 'up' ? metrics.height / 2 : 0,
     z: 0,
   }
 }
 
 /** Normals face the interior of the box. No free Euler-angle editing. */
-export function presetRotation(preset: RotationPreset): [number, number, number] {
-  switch (preset) {
-    case 'ground': return [-Math.PI / 2, 0, 0]
-    case 'ceiling': return [Math.PI / 2, 0, 0]
-    case 'left-wall': return [0, Math.PI / 2, 0]
-    case 'right-wall': return [0, -Math.PI / 2, 0]
+export function orientationRotation(direction: PlaneDirection): [number, number, number] {
+  switch (direction) {
+    case 'down': return [-Math.PI / 2, 0, 0]
+    case 'up': return [Math.PI / 2, 0, 0]
+    case 'left': return [0, Math.PI / 2, 0]
+    case 'right': return [0, -Math.PI / 2, 0]
     case 'front': return [0, 0, 0]
   }
 }
@@ -79,6 +90,7 @@ export function moveOrigin(layer: Layer, x: number, y: number): Layer {
   if (![x, y].every(Number.isFinite)) throw new Error('配置基準点には有限の数値を指定してください。')
   return {
     ...layer,
+    orientation: { ...layer.orientation },
     origin: { x, y, z: 0 },
     rect: { ...layer.rect },
     depthRange: layer.depthRange ? { ...layer.depthRange } : null,
@@ -86,19 +98,19 @@ export function moveOrigin(layer: Layer, x: number, y: number): Layer {
   }
 }
 
-export function changePreset(settings: SceneSettings, layer: Layer, preset: RotationPreset): Layer {
-  if (preset === layer.kind) return layer
-  const origin = defaultOrigin(settings, preset)
+export function changeOrientation(settings: SceneSettings, layer: Layer, orientation: PlaneOrientation): Layer {
+  if (orientation.direction === layer.orientation.direction) return layer
+  const origin = defaultOrigin(settings, orientation.direction)
   const moved = moveOrigin(layer, origin.x, origin.y)
-  if (preset === 'ground' || preset === 'ceiling') moved.transform.y = origin.y
-  if (preset === 'left-wall' || preset === 'right-wall') moved.transform.x = origin.x
+  if (orientation.direction === 'down' || orientation.direction === 'up') moved.transform.y = origin.y
+  if (orientation.direction === 'left' || orientation.direction === 'right') moved.transform.x = origin.x
   const metrics = referenceMetrics(settings)
-  if (preset === 'front' && moved.transform.z >= metrics.cameraZ - metrics.near) {
-    throw new Error('正面に変更する前に、両端Zの範囲をカメラより奥へ移動してください。')
+  if (orientation.relation === 'parallel' && moved.transform.z >= metrics.cameraZ - metrics.near) {
+    throw new Error('平行な面に変更する前に、両端Zの範囲をカメラより奥へ移動してください。')
   }
-  const changed = { ...moved, kind: preset }
-  if (preset === 'front') return { ...changed, depthRange: null }
-  const size = preset === 'left-wall' || preset === 'right-wall' ? changed.transform.width : changed.transform.height
+  const changed = { ...moved, orientation: { ...orientation } }
+  if (orientation.relation === 'parallel') return { ...changed, depthRange: null }
+  const size = isWall(changed) ? changed.transform.width : changed.transform.height
   return setDepthRange(changed, changed.transform.z + size / 2, changed.transform.z - size / 2)
 }
 
@@ -152,18 +164,18 @@ export function frontRect(settings: SceneSettings, transform: Transform): Rect {
 export function initialLayers(settings: SceneSettings): Layer[] {
   const rect = { x: 0, y: 0, width: settings.width, height: settings.height }
   return [
-    { id: 'layer-1', name: 'レイヤー 1', kind: 'front', editorColor: '#78c5b1', visible: true,
+    { id: 'layer-1', name: 'レイヤー 1', orientation: orientationFor('front'), editorColor: '#78c5b1', visible: true,
       origin: defaultOrigin(settings, 'front'),
       depthRange: null,
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, -40) },
-    { id: 'layer-2', name: 'レイヤー 2', kind: 'front', editorColor: '#efb66d', visible: true,
+    { id: 'layer-2', name: 'レイヤー 2', orientation: orientationFor('front'), editorColor: '#efb66d', visible: true,
       origin: defaultOrigin(settings, 'front'),
       depthRange: null,
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, 1) },
-    setDepthRange({ id: 'ground', name: '地面', kind: 'ground', editorColor: '#9695e4', visible: true,
-      origin: defaultOrigin(settings, 'ground'),
+    setDepthRange({ id: 'ground', name: '地面', orientation: orientationFor('down'), editorColor: '#9695e4', visible: true,
+      origin: defaultOrigin(settings, 'down'),
       depthRange: null,
-      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform, y: defaultOrigin(settings, 'ground').y } },
+      alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform, y: defaultOrigin(settings, 'down').y } },
       defaultGroundDepthRange.frontZ, defaultGroundDepthRange.backZ),
   ]
 }
@@ -177,12 +189,12 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
     let depthRange = layer.depthRange ? { ...layer.depthRange } : null
     let transform = { ...layer.transform }
     let rect = { ...layer.rect }
-    if (layer.kind !== 'front') {
+    if (layer.orientation.relation === 'perpendicular') {
       if (!depthRange) throw new Error('面の手前端Z・奥端Zが設定されていません。')
       depthRange = { frontZ: depthRange.frontZ * depthScale, backZ: depthRange.backZ * depthScale }
       transform = setDepthRange(layer, depthRange.frontZ, depthRange.backZ).transform
     }
-    if (layer.kind === 'front' && preserveScreen) {
+    if (layer.orientation.relation === 'parallel' && preserveScreen) {
       const old = frontRect(previous, layer.transform)
       rect = {
         x: old.x * next.width / previous.width,
@@ -192,9 +204,9 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
       }
       transform = placeFront(next, rect, layer.transform.z)
     }
-    if (layer.kind === 'front' && transform.z >= metrics.cameraZ - metrics.near) {
+    if (layer.orientation.relation === 'parallel' && transform.z >= metrics.cameraZ - metrics.near) {
       throw new Error('設定変更後にカメラのnear面を越えるレイヤーがあります。奥行きを下げてから適用してください。')
     }
-    return { ...layer, origin: { ...layer.origin }, depthRange, rect, transform }
+    return { ...layer, orientation: { ...layer.orientation }, origin: { ...layer.origin }, depthRange, rect, transform }
   })
 }

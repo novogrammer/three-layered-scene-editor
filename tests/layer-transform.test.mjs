@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { Group, Object3D, PerspectiveCamera, Vector3 } from 'three/webgpu'
 import { applyLayerTransform } from '../src/layer-transform.ts'
-import { changePreset, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics, setDepthRange } from '../src/model.ts'
+import { changeOrientation, orientationFor, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics, setDepthRange } from '../src/model.ts'
 
 function closeVector(actual, expected) {
   actual.toArray().forEach((value, i) => expect(value).toBeCloseTo(expected[i], 10))
@@ -17,8 +17,8 @@ function objects(layer) {
 test('preset origins lie on the reference frame edges at world z=0', () => {
   const halfWidth = 5 * 1920 / 1080 / 2
   for (const [preset, expected] of [
-    ['front', [0, 0, 0]], ['ground', [0, -2.5, 0]], ['ceiling', [0, 2.5, 0]],
-    ['left-wall', [-halfWidth, 0, 0]], ['right-wall', [halfWidth, 0, 0]],
+    ['front', [0, 0, 0]], ['down', [0, -2.5, 0]], ['up', [0, 2.5, 0]],
+    ['left', [-halfWidth, 0, 0]], ['right', [halfWidth, 0, 0]],
   ]) {
     expect(Object.values(defaultOrigin(defaultSettings, preset))).toEqual(expected)
   }
@@ -27,10 +27,10 @@ test('preset origins lie on the reference frame edges at world z=0', () => {
 test('preset normals face the interior while each placement origin stays at z=0', () => {
   const source = initialLayers(defaultSettings)[2]
   for (const [preset, normal] of [
-    ['front', [0, 0, 1]], ['ground', [0, 1, 0]], ['ceiling', [0, -1, 0]],
-    ['left-wall', [1, 0, 0]], ['right-wall', [-1, 0, 0]],
+    ['front', [0, 0, 1]], ['down', [0, 1, 0]], ['up', [0, -1, 0]],
+    ['left', [1, 0, 0]], ['right', [-1, 0, 0]],
   ]) {
-    const layer = changePreset(defaultSettings, source, preset)
+    const layer = changeOrientation(defaultSettings, source, orientationFor(preset))
     const { root, plane } = objects(layer)
     closeVector(new Vector3().applyMatrix4(root.matrixWorld), [layer.origin.x, layer.origin.y, 0])
     closeVector(new Vector3(0, 0, 1).transformDirection(plane.matrixWorld), normal)
@@ -76,11 +76,11 @@ test('FOV correction leaves the placement origin on z=0 and scales the ground of
   expect(root.getWorldPosition(new Vector3()).z).toBe(0)
 })
 
-test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its projected surface and placement origin through FOV changes', (preset) => {
-  let layer = changePreset(defaultSettings, initialLayers(defaultSettings)[2], preset)
+test.each(['down', 'left', 'right', 'up'])('%s preserves its projected surface and placement origin through FOV changes', (preset) => {
+  let layer = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(preset))
   layer = moveOrigin(layer, layer.origin.x + 0.8, layer.origin.y - 0.3)
   layer.transform = { ...layer.transform, z: -9, width: 11, height: 7 }
-  const depth = preset === 'left-wall' || preset === 'right-wall' ? 11 : 7
+  const depth = preset === 'left' || preset === 'right' ? 11 : 7
   layer = setDepthRange(layer, -9 + depth / 2, -9 - depth / 2)
   const original = structuredClone(layer)
   const project = (settings, surface) => {
@@ -92,7 +92,7 @@ test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its pr
       new Vector3(x, y, 0).applyMatrix4(plane.matrixWorld).project(camera)))
   }
   const expected = project(defaultSettings, layer)
-  const crossSection = preset === 'left-wall' || preset === 'right-wall' ? 'height' : 'width'
+  const crossSection = preset === 'left' || preset === 'right' ? 'height' : 'width'
   for (const preserveScreen of [true, false]) {
     for (const fov of [20, 60, 90]) {
       const next = { ...defaultSettings, fov }
@@ -124,8 +124,8 @@ test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its pr
   expect(resolutionOnly.transform).toEqual(layer.transform)
 })
 
-test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s derives its geometry from ordered Z endpoints', (preset) => {
-  const original = changePreset(defaultSettings, initialLayers(defaultSettings)[2], preset)
+test.each(['down', 'left', 'right', 'up'])('%s derives its geometry from ordered Z endpoints', (preset) => {
+  const original = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(preset))
   const before = structuredClone(original)
   for (const [frontZ, backZ] of [[12, -28], [0, -20], [-5, -30], [15, 2]]) {
     const layer = setDepthRange(original, frontZ, backZ)

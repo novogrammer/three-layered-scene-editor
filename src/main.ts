@@ -2,8 +2,8 @@ import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
-import { changePreset, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, rotationPresets, setDepthRange } from './model'
-import type { Layer, SceneSettings } from './model'
+import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
+import type { Layer, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -85,7 +85,7 @@ function renderList() {
     const name = document.createElement('span')
     name.textContent = layer.name
     const detail = document.createElement('small')
-    detail.textContent = layer.visible ? rotationPresets[layer.kind] : '非表示'
+    detail.textContent = layer.visible ? `${planeRelations[layer.orientation.relation]} / ${planeDirections[layer.orientation.direction]}` : '非表示'
     button.append(dot, name, detail)
     button.onclick = () => {
       selected = index
@@ -127,24 +127,40 @@ function renderPanel() {
   const panel = get('layer-panel')
   panel.replaceChildren()
   const title = document.createElement('h2'); title.textContent = `${layer.name}の設定`; panel.append(title)
-  const presetLabel = document.createElement('label'); presetLabel.textContent = '回転プリセット'
-  const preset = document.createElement('select')
-  for (const [value, name] of Object.entries(rotationPresets)) {
-    const option = document.createElement('option'); option.value = value; option.textContent = name
-    preset.append(option)
-  }
-  preset.value = layer.kind
-  preset.onchange = () => {
+  const change = (direction: PlaneDirection) => {
     try {
-      layers[selected] = changePreset(settings, layer, preset.value as Layer['kind'])
+      layers[selected] = changeOrientation(settings, layer, orientationFor(direction))
       sync(); renderList(); renderPanel()
-      status('回転プリセットと基準点を変更しました。画像と面のサイズは維持しています。')
+      status('面の配置方式・向きと基準点を変更しました。位置は下の入力欄で調整できます。')
     } catch (error) {
-      status(error instanceof Error ? error.message : 'プリセットを変更できませんでした。', true)
+      status(error instanceof Error ? error.message : '面の向きを変更できませんでした。', true)
       renderPanel()
     }
   }
-  presetLabel.append(preset); panel.append(presetLabel)
+  const relationLabel = document.createElement('label'); relationLabel.textContent = '基準面との関係'
+  const relation = document.createElement('select')
+  for (const [value, name] of Object.entries(planeRelations)) {
+    const option = document.createElement('option'); option.value = value; option.textContent = name
+    relation.append(option)
+  }
+  relation.value = layer.orientation.relation
+  relation.onchange = () => change(relation.value === 'parallel' ? 'front' : 'down')
+  relationLabel.append(relation); panel.append(relationLabel)
+  if (layer.orientation.relation === 'perpendicular') {
+    const directionLabel = document.createElement('label'); directionLabel.textContent = '面の向き'
+    const direction = document.createElement('select')
+    for (const [value, name] of Object.entries(planeDirections)) {
+      if (value === 'front') continue
+      const option = document.createElement('option'); option.value = value; option.textContent = name
+      direction.append(option)
+    }
+    direction.value = layer.orientation.direction
+    direction.onchange = () => change(direction.value as PlaneDirection)
+    directionLabel.append(direction); panel.append(directionLabel)
+  }
+  const method = document.createElement('p'); method.className = 'hint'
+  method.textContent = layer.orientation.relation === 'parallel' ? '表示方式：頂点UV（自動）' : '表示方式：カメラ投影 / TSL（自動）'
+  panel.append(method)
   const fileLabel = document.createElement('label'); fileLabel.textContent = '画像を読み込む（PNG / JPEG / WebP）'
   const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'
   fileLabel.append(input); panel.append(fileLabel)
@@ -168,7 +184,7 @@ function renderPanel() {
   mode.value = layer.alphaMode
   mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; sync() }
   modeLabel.append(mode); panel.append(modeLabel)
-  if (layer.kind === 'front') {
+  if (layer.orientation.relation === 'parallel') {
     const label = document.createElement('label'); label.textContent = '奥行き変更時'
     const select = document.createElement('select')
     select.innerHTML = '<option value="screen">2D位置・サイズを保つ</option><option value="world">3D位置・サイズを保つ</option>'
@@ -192,7 +208,7 @@ function renderPanel() {
     }
   } else {
     const grid = document.createElement('div'); grid.className = 'pair'; panel.append(grid)
-    const wall = layer.kind === 'left-wall' || layer.kind === 'right-wall'
+    const wall = isWall(layer)
     const fields: [keyof Layer['transform'], string][] = wall
       ? [['y', '面の中心Y'], ['height', '高さ']]
       : [['x', '面の中心X'], ['width', '幅']]
@@ -217,7 +233,7 @@ function renderPanel() {
   panel.append(originTitle)
   const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
   for (const [key, label] of [['x', '基準点X'], ['y', '基準点Y']] as const) {
-    numberField(originFields, label, layer.origin[key], (value) => {
+    numberField(originFields, layer.orientation.relation === 'perpendicular' ? `${label.slice(-1)}位置（基準点）` : label, layer.origin[key], (value) => {
       layers[selected] = moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y)
     }, -500, 500)
   }
