@@ -135,6 +135,13 @@ function numberField(parent: HTMLElement, label: string, value: number, onChange
   return input
 }
 
+function coordinateHint(parent: HTMLElement, text: string, id: string, inputs: HTMLInputElement[]) {
+  const hint = document.createElement('span')
+  hint.id = id; hint.className = 'coordinate-hint'; hint.textContent = text
+  parent.append(hint)
+  inputs.forEach(input => input.setAttribute('aria-describedby', id))
+}
+
 function renderPanel() {
   const layer = layers.find(layer => layer.id === selectedId)
   const panel = get('layer-panel')
@@ -231,12 +238,13 @@ function renderPanel() {
     select.title = '2D配置の保持は、基準カメラから見た位置とサイズを維持します。'; select.value = depthMode; select.onchange = () => { depthMode = select.value }
     label.append(select); panel.append(label)
     const metrics = referenceMetrics(settings)
-    numberField(panel, '奥行きZ', layer.transform.z, (z) => {
+    const zInput = numberField(panel, '奥行きZ', layer.transform.z, (z) => {
       if (z >= metrics.cameraZ - metrics.near) throw new Error('カメラより奥へ配置してください。')
       const rect = frontRect(settings, layer.transform)
       layer.transform = depthMode === 'screen' ? placeFront(settings, rect, z) : { ...layer.transform, z }
       layer.rect = frontRect(settings, layer.transform)
     }, -500, metrics.cameraZ - metrics.near - 0.001)
+    coordinateHint(zInput.parentElement!, '基準面 Z = 0', 'reference-z-coordinate', [zInput])
     const details = document.createElement('details')
     const summary = document.createElement('summary'); summary.textContent = '3D配置'
     details.append(summary); panel.append(details)
@@ -257,22 +265,37 @@ function renderPanel() {
         key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
     const range = layer.depthRange!
-    numberField(grid, '手前端Z', range.frontZ, (value) => {
+    const frontInput = numberField(grid, '手前端Z', range.frontZ, (value) => {
       replaceLayer(setDepthRange(layer, value, range.backZ))
     }, -1000, 1000)
-    numberField(grid, '奥端Z', range.backZ, (value) => {
+    const backInput = numberField(grid, '奥端Z', range.backZ, (value) => {
       replaceLayer(setDepthRange(layer, range.frontZ, value))
     }, -1000, 1000)
+    coordinateHint(grid, '基準面 Z = 0', 'reference-z-coordinate', [frontInput, backInput])
 
   }
-  const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点 · Z=0'; originTitle.title = '基準点を動かすと、面も同じ量だけ移動します。'
+  const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点'; originTitle.title = '基準点を動かすと、面も同じ量だけ移動します。'
   panel.append(originTitle)
+  const metrics = referenceMetrics(settings)
+  const edges = {
+    down: ['下端', 'y', -metrics.height / 2],
+    up: ['上端', 'y', metrics.height / 2],
+    left: ['左端', 'x', -metrics.width / 2],
+    right: ['右端', 'x', metrics.width / 2],
+  } as const
+  const edge = layer.orientation.relation === 'perpendicular' ? edges[layer.orientation.direction] : null
   const originFields = document.createElement('div'); originFields.className = 'pair'; panel.append(originFields)
+  const originInputs: HTMLInputElement[] = []
   for (const key of ['x', 'y'] as const) {
     const originInput = numberField(originFields, key.toUpperCase(), layer.origin[key], (value) => {
       replaceLayer(moveOrigin(layer, key === 'x' ? value : layer.origin.x, key === 'y' ? value : layer.origin.y))
     }, -500, 500)
     originInput.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()}`)
+    originInputs.push(originInput)
+  }
+  if (edge) {
+    coordinateHint(originFields, `基準面の${edge[0]} ${edge[1].toUpperCase()} = ${Number(edge[2].toFixed(4))}`,
+      'origin-edge-coordinate', originInputs)
   }
 
 }

@@ -86,4 +86,6 @@ button:disabled { opacity: .45; cursor: default; }
 .layer-item small { flex-shrink: 0; }
 .layer-order { display: flex; gap: 8px; margin-bottom: 16px; }
 .layer-order button { flex: 1; padding: 5px 9px; font-size: 11px; }
+.coordinate-hint, label > .coordinate-hint { display: block; color: #93a6b1; font-size: 11px; line-height: 1.5; margin-top: 5px; }
+.pair > .coordinate-hint { grid-column: 1 / -1; margin: -7px 0 12px; }
 input[type=file][hidden] { display: none; }
