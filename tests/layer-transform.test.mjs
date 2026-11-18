@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { Group, Object3D, PerspectiveCamera, Vector3 } from 'three/webgpu'
 import { applyLayerTransform } from '../src/layer-transform.ts'
-import { changePreset, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics } from '../src/model.ts'
+import { changePreset, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics, setDepthRange } from '../src/model.ts'
 
 function closeVector(actual, expected) {
   actual.toArray().forEach((value, i) => expect(value).toBeCloseTo(expected[i], 10))
@@ -44,9 +44,10 @@ test('preset normals face the interior while each placement origin stays at z=0'
   }
 })
 
-test('separating the ground origin preserves all four corners of the existing sample', () => {
+test('the initial ground starts at z=0 and its corners match the derived transform', () => {
   const layer = initialLayers(defaultSettings)[2]
   const { plane } = objects(layer)
+  expect(new Vector3(0, -0.5, 0).applyMatrix4(plane.matrixWorld).z).toBeCloseTo(0, 10)
   for (const x of [-0.5, 0.5]) for (const y of [-0.5, 0.5]) {
     closeVector(new Vector3(x, y, 0).applyMatrix4(plane.matrixWorld),
       [layer.transform.x + x * layer.transform.width, layer.transform.y,
@@ -79,6 +80,8 @@ test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its pr
   let layer = changePreset(defaultSettings, initialLayers(defaultSettings)[2], preset)
   layer = moveOrigin(layer, layer.origin.x + 0.8, layer.origin.y - 0.3)
   layer.transform = { ...layer.transform, z: -9, width: 11, height: 7 }
+  const depth = preset === 'left-wall' || preset === 'right-wall' ? 11 : 7
+  layer = setDepthRange(layer, -9 + depth / 2, -9 - depth / 2)
   const original = structuredClone(layer)
   const project = (settings, surface) => {
     const camera = new PerspectiveCamera(settings.fov, settings.width / settings.height, 0.01, 1000)
@@ -100,6 +103,9 @@ test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its pr
       })
       expect(updated.origin).toEqual(layer.origin)
       expect(updated.origin.z).toBe(0)
+      const k = referenceMetrics(next).cameraZ / referenceMetrics(defaultSettings).cameraZ
+      expect(updated.depthRange.frontZ).toBeCloseTo(layer.depthRange.frontZ * k, 10)
+      expect(updated.depthRange.backZ).toBeCloseTo(layer.depthRange.backZ * k, 10)
       for (const key of ['x', 'y', crossSection]) expect(updated.transform[key]).toBe(layer.transform[key])
     }
   }
@@ -111,7 +117,28 @@ test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s preserves its pr
     previous = next
   }
   for (const key of Object.keys(layer.transform)) expect(current.transform[key]).toBeCloseTo(layer.transform[key], 10)
+  expect(current.depthRange.frontZ).toBeCloseTo(layer.depthRange.frontZ, 10)
+  expect(current.depthRange.backZ).toBeCloseTo(layer.depthRange.backZ, 10)
   expect(layer).toEqual(original)
   const [resolutionOnly] = reconfigureScene(defaultSettings, { ...defaultSettings, width: 3840, height: 2160 }, [layer], true)
   expect(resolutionOnly.transform).toEqual(layer.transform)
+})
+
+test.each(['ground', 'left-wall', 'right-wall', 'ceiling'])('%s derives its geometry from ordered Z endpoints', (preset) => {
+  const original = changePreset(defaultSettings, initialLayers(defaultSettings)[2], preset)
+  const before = structuredClone(original)
+  for (const [frontZ, backZ] of [[12, -28], [0, -20], [-5, -30], [15, 2]]) {
+    const layer = setDepthRange(original, frontZ, backZ)
+    const { plane } = objects(layer)
+    const corners = [-0.5, 0.5].flatMap(x => [-0.5, 0.5].map(y =>
+      new Vector3(x, y, 0).applyMatrix4(plane.matrixWorld)))
+    expect(Math.max(...corners.map(point => point.z))).toBeCloseTo(frontZ, 10)
+    expect(Math.min(...corners.map(point => point.z))).toBeCloseTo(backZ, 10)
+    expect(layer.transform.z).toBe((frontZ + backZ) / 2)
+    expect(layer.origin).toEqual(original.origin)
+  }
+  for (const [frontZ, backZ] of [[1, 1], [-10, 0], [NaN, -1], [2, -Infinity]]) {
+    expect(() => setDepthRange(original, frontZ, backZ)).toThrow()
+  }
+  expect(original).toEqual(before)
 })

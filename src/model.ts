@@ -10,6 +10,7 @@ export interface Rect { x: number; y: number; width: number; height: number }
 export interface Transform { x: number; y: number; z: number; width: number; height: number }
 export type RotationPreset = 'front' | 'ground' | 'left-wall' | 'right-wall' | 'ceiling'
 export interface PlacementOrigin { x: number; y: number; z: 0 }
+export interface DepthRange { frontZ: number; backZ: number }
 export const rotationPresets: Record<RotationPreset, string> = {
   front: '正面', ground: '地面', 'left-wall': '左壁', 'right-wall': '右壁', ceiling: '天井',
 }
@@ -23,13 +24,35 @@ export interface Layer {
   visible: boolean
   alphaMode: AlphaMode
   rect: Rect
+  // Surface endpoints are authoritative; transform center/depth are derived render values.
+  depthRange: Readonly<DepthRange> | null
   transform: Transform
 }
 
 export const defaultSettings: SceneSettings = { width: 1920, height: 1080, referenceHeight: 5, fov: 45 }
 
 // The static sample ground image was exported to match this initial geometry.
-export const defaultGroundTransform: Transform = { x: 0, y: -2.5, z: -8, width: 60, height: 40 }
+export const defaultGroundDepthRange: Readonly<DepthRange> = { frontZ: 0, backZ: -28 }
+export const defaultGroundTransform: Transform = {
+  x: 0, y: -2.5, width: 60,
+  z: (defaultGroundDepthRange.frontZ + defaultGroundDepthRange.backZ) / 2,
+  height: defaultGroundDepthRange.frontZ - defaultGroundDepthRange.backZ,
+}
+
+export function setDepthRange(layer: Layer, frontZ: number, backZ: number): Layer {
+  if (layer.kind === 'front') throw new Error('正面レイヤーは奥行きZで配置してください。')
+  if (![frontZ, backZ].every(Number.isFinite) || frontZ <= backZ) {
+    throw new Error('手前端Zは奥端Zより大きい有限の数値にしてください。')
+  }
+  const depthAxis = layer.kind === 'left-wall' || layer.kind === 'right-wall' ? 'width' : 'height'
+  return {
+    ...layer,
+    origin: { ...layer.origin },
+    rect: { ...layer.rect },
+    depthRange: { frontZ, backZ },
+    transform: { ...layer.transform, z: (frontZ + backZ) / 2, [depthAxis]: frontZ - backZ },
+  }
+}
 
 export function defaultOrigin(settings: SceneSettings, preset: RotationPreset): PlacementOrigin {
   const metrics = referenceMetrics(settings)
@@ -58,6 +81,7 @@ export function moveOrigin(layer: Layer, x: number, y: number): Layer {
     ...layer,
     origin: { x, y, z: 0 },
     rect: { ...layer.rect },
+    depthRange: layer.depthRange ? { ...layer.depthRange } : null,
     transform: { ...layer.transform, x: layer.transform.x + x - layer.origin.x, y: layer.transform.y + y - layer.origin.y },
   }
 }
@@ -70,9 +94,12 @@ export function changePreset(settings: SceneSettings, layer: Layer, preset: Rota
   if (preset === 'left-wall' || preset === 'right-wall') moved.transform.x = origin.x
   const metrics = referenceMetrics(settings)
   if (preset === 'front' && moved.transform.z >= metrics.cameraZ - metrics.near) {
-    throw new Error('正面に変更する前に、中心Zをカメラより奥へ移動してください。')
+    throw new Error('正面に変更する前に、両端Zの範囲をカメラより奥へ移動してください。')
   }
-  return { ...moved, kind: preset }
+  const changed = { ...moved, kind: preset }
+  if (preset === 'front') return { ...changed, depthRange: null }
+  const size = preset === 'left-wall' || preset === 'right-wall' ? changed.transform.width : changed.transform.height
+  return setDepthRange(changed, changed.transform.z + size / 2, changed.transform.z - size / 2)
 }
 
 export function referenceMetrics(settings: SceneSettings) {
@@ -127,13 +154,17 @@ export function initialLayers(settings: SceneSettings): Layer[] {
   return [
     { id: 'layer-1', name: 'レイヤー 1', kind: 'front', editorColor: '#78c5b1', visible: true,
       origin: defaultOrigin(settings, 'front'),
+      depthRange: null,
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, -40) },
     { id: 'layer-2', name: 'レイヤー 2', kind: 'front', editorColor: '#efb66d', visible: true,
       origin: defaultOrigin(settings, 'front'),
+      depthRange: null,
       alphaMode: 'BLEND', rect: { ...rect }, transform: placeFront(settings, rect, 1) },
-    { id: 'ground', name: '地面', kind: 'ground', editorColor: '#9695e4', visible: true,
+    setDepthRange({ id: 'ground', name: '地面', kind: 'ground', editorColor: '#9695e4', visible: true,
       origin: defaultOrigin(settings, 'ground'),
+      depthRange: null,
       alphaMode: 'OPAQUE', rect: { ...rect }, transform: { ...defaultGroundTransform, y: defaultOrigin(settings, 'ground').y } },
+      defaultGroundDepthRange.frontZ, defaultGroundDepthRange.backZ),
   ]
 }
 
@@ -143,13 +174,13 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
   // Compensate the FOV change only; reference-height changes remain independent.
   const depthScale = Math.tan(previous.fov * Math.PI / 360) / Math.tan(next.fov * Math.PI / 360)
   return layers.map((layer) => {
+    let depthRange = layer.depthRange ? { ...layer.depthRange } : null
     let transform = { ...layer.transform }
     let rect = { ...layer.rect }
     if (layer.kind !== 'front') {
-      transform.z *= depthScale
-      // Wall depth follows the plane's local X; floor/ceiling depth follows local Y.
-      if (layer.kind === 'left-wall' || layer.kind === 'right-wall') transform.width *= depthScale
-      else transform.height *= depthScale
+      if (!depthRange) throw new Error('面の手前端Z・奥端Zが設定されていません。')
+      depthRange = { frontZ: depthRange.frontZ * depthScale, backZ: depthRange.backZ * depthScale }
+      transform = setDepthRange(layer, depthRange.frontZ, depthRange.backZ).transform
     }
     if (layer.kind === 'front' && preserveScreen) {
       const old = frontRect(previous, layer.transform)
@@ -164,6 +195,6 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
     if (layer.kind === 'front' && transform.z >= metrics.cameraZ - metrics.near) {
       throw new Error('設定変更後にカメラのnear面を越えるレイヤーがあります。奥行きを下げてから適用してください。')
     }
-    return { ...layer, origin: { ...layer.origin }, rect, transform }
+    return { ...layer, origin: { ...layer.origin }, depthRange, rect, transform }
   })
 }

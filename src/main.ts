@@ -2,7 +2,7 @@ import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
-import { changePreset, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, rotationPresets } from './model'
+import { changePreset, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, rotationPresets, setDepthRange } from './model'
 import type { Layer, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -194,16 +194,23 @@ function renderPanel() {
     const grid = document.createElement('div'); grid.className = 'pair'; panel.append(grid)
     const wall = layer.kind === 'left-wall' || layer.kind === 'right-wall'
     const fields: [keyof Layer['transform'], string][] = wall
-      ? [['y', '面の中心Y'], ['z', '面の中心Z'], ['width', '奥行きサイズ'], ['height', '高さ']]
-      : [['x', '面の中心X'], ['z', '面の中心Z'], ['width', '幅'], ['height', '奥行きサイズ']]
+      ? [['y', '面の中心Y'], ['height', '高さ']]
+      : [['x', '面の中心X'], ['width', '幅']]
     for (const [key, label] of fields) {
       numberField(grid, label, layer.transform[key], (value) => { layer.transform[key] = value },
         key === 'width' || key === 'height' ? 0.01 : -500, 500)
     }
+    const range = layer.depthRange!
+    numberField(grid, '手前端Z（＋が手前）', range.frontZ, (value) => {
+      layers[selected] = setDepthRange(layer, value, range.backZ)
+    }, -1000, 1000)
+    numberField(grid, '奥端Z（−が奥）', range.backZ, (value) => {
+      layers[selected] = setDepthRange(layer, range.frontZ, value)
+    }, -1000, 1000)
     const hint = document.createElement('p'); hint.className = 'hint'
     hint.textContent = wall
-      ? 'FOV変更時は中心Zと奥行きを調整し、左右位置・高さは維持します。面の位置は配置基準点で指定します。'
-      : 'FOV変更時は中心Zと奥行きを調整し、高さ・幅は維持します。面の高さは配置基準点Yで指定します。'
+      ? '原点Z=0からの両端座標を指定します。FOV変更時は両端Zを伸縮し、左右位置・高さは維持します。'
+      : '原点Z=0からの両端座標を指定します。FOV変更時は両端Zを伸縮し、高さ・幅は維持します。'
     panel.append(hint)
   }
   const originTitle = document.createElement('h2'); originTitle.textContent = '配置基準点（Z = 0）'
