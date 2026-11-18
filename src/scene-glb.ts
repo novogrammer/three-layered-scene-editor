@@ -10,6 +10,8 @@ import type { ImageSource } from './scene-json'
 import { embedOriginalImages } from './glb-container'
 import type { GlbOriginalImage } from './glb-container'
 import { configureProjectionCamera } from './projection-camera'
+import { GLB_PROJECTION_CAMERA_ID, GLB_PROJECTION_EXTRAS_KEY } from './glb-projection-extras'
+import type { GlbLayerProjectionV1, GlbProjectionCameraV1, GlbSceneProjectionV1 } from './glb-projection-extras'
 
 /** Coarse vertex-UV preview grid; final projection can be evaluated by a shader. */
 export const SURFACE_GRID_SEGMENTS = 8
@@ -24,11 +26,22 @@ export async function createSceneGlb(settings: SceneSettings, layers: readonly L
     images.set(layer.id, { fileName: source.fileName, blob: source.blob, width: source.image.width, height: source.image.height })
   }
   const scene = new Scene(), camera = new PerspectiveCamera()
+  const sceneProjection: GlbSceneProjectionV1 = {
+    version: 1, role: 'scene', projectionCameraId: GLB_PROJECTION_CAMERA_ID,
+    composition: { width: config.width, height: config.height },
+    rendering: { toneMapping: 'none' },
+    projection: { imageFit: 'cover', imageAlign: 'center', clipDepthRange: 'minus-one-to-one',
+      projectedUvOrigin: 'bottom-left', textureUvOrigin: 'top-left', outsideImage: 'clamp', invalidProjection: 'discard' },
+  }
+  const cameraProjection: GlbProjectionCameraV1 = { version: 1, role: 'projectionCamera', id: GLB_PROJECTION_CAMERA_ID }
+  scene.userData[GLB_PROJECTION_EXTRAS_KEY] = sceneProjection
+  camera.userData[GLB_PROJECTION_EXTRAS_KEY] = cameraProjection
   camera.name = 'projectionCamera'; configureProjectionCamera(camera, config, snapshot); scene.add(camera)
   const matrix = new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
   const owned: { geometry: PlaneGeometry; material: MeshBasicMaterial }[] = []
   try {
-    for (const layer of snapshot.filter(layer => layer.visible)) {
+    for (const [listIndex, layer] of snapshot.entries()) {
+      if (!layer.visible) continue
       const projected = layer.orientation.relation === 'perpendicular'
       const segments = projected ? SURFACE_GRID_SEGMENTS : 1
       const geometry = new PlaneGeometry(1, 1, segments, segments)
@@ -40,6 +53,13 @@ export async function createSceneGlb(settings: SceneSettings, layers: readonly L
       applyLayerTransform(root, mesh, layer)
       if (!updateProjectedUVs(geometry, mesh.matrixWorld, matrix)) throw new Error(`「${layer.name}」が投影カメラの範囲外です。配置を調整してください。`)
       const fit = centeredCover(images.get(layer.id)!, config).uv, uv = geometry.getAttribute('uv')
+      const layerProjection: GlbLayerProjectionV1 = {
+        version: 1, role: 'layer', layerId: layer.id, listIndex,
+        sampling: projected ? { mode: 'camera', cameraId: GLB_PROJECTION_CAMERA_ID,
+          imageUvScale: [fit.scaleX, fit.scaleY], imageUvOffset: [fit.offsetX, fit.offsetY] }
+          : { mode: 'uv', texCoord: 0 },
+      }
+      mesh.userData[GLB_PROJECTION_EXTRAS_KEY] = layerProjection
       for (let i = 0; i < uv.count; i++) {
         // glTF samples the original image with top-left texture coordinates (no canvas flip).
         uv.setXY(i, uv.getX(i) * fit.scaleX + fit.offsetX, 1 - (uv.getY(i) * fit.scaleY + fit.offsetY))
