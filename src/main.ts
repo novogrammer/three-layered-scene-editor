@@ -2,6 +2,7 @@ import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { demoFiles, loadDemoImages } from './demo'
+import { imageAspectNotice } from './image-aspect'
 import { changeOrientation, defaultSettings, frontRect, initialLayers, moveOrigin, placeFront, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, setDepthRange } from './model'
 import type { Layer, PlaneDirection, SceneSettings } from './model'
 
@@ -164,6 +165,17 @@ function renderPanel() {
   fileLabel.append(input); panel.append(fileLabel)
   const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = sourceNames[selected]!
   panel.append(fileInfo)
+  const image = images[selected]!
+  const aspectMessage = imageAspectNotice({ width: image.naturalWidth, height: image.naturalHeight }, settings)
+  if (aspectMessage) {
+    const notice = document.createElement('p')
+    notice.id = 'image-aspect-notice'
+    notice.className = 'image-notice'
+    notice.setAttribute('role', 'status')
+    notice.textContent = aspectMessage
+    input.setAttribute('aria-describedby', notice.id)
+    panel.append(notice)
+  }
   const index = selected
   input.onchange = () => { const file = input.files?.[0]; if (file) void loadImage(file, index) }
   const row = document.createElement('div'); row.className = 'layer-options'
@@ -249,9 +261,6 @@ async function loadImage(file: File, index: number) {
     if (!alive || version !== uploadVersions[index]) return
     const maxSize = Math.min(8192, maxTextureSize)
     if (image.width > maxSize || image.height > maxSize) throw new Error(`画像の各辺は${maxSize}px以下にしてください。`)
-    if (Math.abs(image.width / image.height / (settings.width / settings.height) - 1) > 0.001) {
-      throw new Error('最小構成では共通キャンバスと同じアスペクト比の画像を使います。先に2D換算解像度を設定してください。')
-    }
     const texture = makeTexture(image)
     const previous = textures[index]!
     textures[index] = texture
