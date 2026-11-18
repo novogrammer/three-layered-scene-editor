@@ -1,7 +1,9 @@
 import './style.css'
 import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
-import { demoFiles, loadDemoImages } from './demo'
+import { loadDemoImages } from './demo'
+import { createSceneDocument } from './scene-json'
+import type { ImageSource } from './scene-json'
 import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
@@ -14,10 +16,11 @@ let settings = { ...defaultSettings }
 let layers = initialLayers(settings)
 let selectedId: string | null = layers[0]?.id ?? null
 let adding = false
+let saving = false
 let depthMode = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
-interface LayerAsset { image: HTMLImageElement; texture: THREE.Texture; name: string }
+interface LayerAsset extends ImageSource { image: HTMLImageElement; texture: THREE.Texture; name: string }
 const assets = new Map<string, LayerAsset>()
 const imageRequests = new Map<string, symbol>()
 const textureMap = () => new Map([...assets].map(([id, asset]) => [id, asset.texture]))
@@ -347,7 +350,7 @@ async function addImageLayer(file: File) {
     if (!alive) return
     const layer = createLayer(settings, layers, crypto.randomUUID(), file.name.replace(/\.[^.]+$/, '') || file.name)
     const texture = makeTexture(image)
-    assets.set(layer.id, { image, texture, name: `${file.name} / ${image.width} × ${image.height}` })
+    assets.set(layer.id, { image, texture, blob: file, fileName: file.name, name: `${file.name} / ${image.width} × ${image.height}` })
     layers = [...layers, layer]
     selectedId = layer.id
     sync(); renderList(); renderPanel()
@@ -381,7 +384,7 @@ async function loadImage(file: File, id: string) {
     if (!alive || imageRequests.get(id) !== request || !assets.has(id)) return
     const texture = makeTexture(image)
     const previous = assets.get(id)!
-    assets.set(id, { image, texture, name: `${file.name} / ${image.width} × ${image.height}` })
+    assets.set(id, { image, texture, blob: file, fileName: file.name, name: `${file.name} / ${image.width} × ${image.height}` })
     sync()
     previous.texture.dispose()
     if (selectedId === id) renderPanel()
@@ -390,6 +393,34 @@ async function loadImage(file: File, id: string) {
     if (alive && imageRequests.get(id) === request && assets.has(id)) {
       status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
     }
+  }
+}
+
+async function saveJson() {
+  if (saving) return
+  const button = get<HTMLButtonElement>('save-json')
+  saving = true; button.disabled = true
+  status('JSONを作成中…')
+  try {
+    const data = await createSceneDocument(settings, layers, assets)
+    if (!alive) return
+    const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    try {
+      const link = document.createElement('a')
+      link.href = url; link.download = 'three-layered-scene.json'
+      document.body.append(link)
+      try { link.click() } finally { link.remove() }
+      status('JSONを書き出しました。')
+    } finally {
+      // Give the browser time to start reading the download before releasing the URL.
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+  } catch (error) {
+    if (alive) status(error instanceof Error ? error.message : 'JSONを保存できませんでした。', true)
+  } finally {
+    saving = false
+    if (alive) button.disabled = false
   }
 }
 
@@ -414,8 +445,8 @@ async function start() {
     const samples = await loadDemoImages()
     if (!alive) return
     layers.forEach((layer, index) => {
-      const image = samples[index]!
-      assets.set(layer.id, { image, texture: makeTexture(image), name: `samples/${demoFiles[index]}` })
+      const sample = samples[index]!
+      assets.set(layer.id, { ...sample, texture: makeTexture(sample.image), name: `samples/${sample.fileName}` })
     })
     editor = new Editor(get('preview'), get('work'), settings, layers, textureMap())
     status('初期化中…')
@@ -423,6 +454,7 @@ async function start() {
     if (!alive) return
     inputs.forEach((element) => { element.disabled = false })
     maxTextureSize = editor.maxTextureSize
+    get('save-json').onclick = () => { void saveJson() }
     const addInput = get<HTMLInputElement>('add-layer-image')
     get('add-layer').onclick = () => { addInput.value = ''; addInput.click() }
     addInput.onchange = () => { const file = addInput.files?.[0]; if (file) void addImageLayer(file) }
