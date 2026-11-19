@@ -81,11 +81,11 @@ JSON読み込みでは、保存→読み込み→再保存による数値・画�
 
 GLB書き出しは、元画像バイトの一致、標準のunlitと透過設定、GLBのチャンクと画像参照、クランプ設定、共有画像、非表示レイヤーの除外、カメラのみの出力を確認する。Three.jsのGLTFLoaderで形状・UV・カメラを読み戻し、各面の全頂点のUVを基準カメラの投影と照合する。テストでは画像デコードだけを置き換えており、ブラウザーや一般ビューアーでの表示確認は未実施。
 
-GLBのシーン・投影カメラ・各Planeのメッシュに`extras.threeLayeredScene`を格納する。GLTFLoaderのuserDataからレイヤーID・投影カメラ参照・UV変換を取得し、編集JSONなしで専用表示を復元できる形式とする。形式と利用手順は[GLBからの投影表示の復元](./glb-projection.md)を参照。独立した読み込み・TSL適用は`src/glb-projection.ts`、デモUIは`src/viewer.ts`と`viewer.html`に用意する。
+GLBのシーン・投影カメラ・各Planeのメッシュに`extras.threeLayeredScene`を格納する。GLTFLoaderのuserDataからレイヤーID・投影カメラ参照・UV変換を取得し、編集JSONなしで専用表示を復元できる形式とする。形式と利用手順は[GLBからの投影表示の復元](./glb-projection.md)を参照。独立したTSL適用は`src/glb-projection.ts`、デモUIは`src/viewer.ts`と`viewer.html`に用意する。
 
 
 ## 独立したGLBビューアー
 
-開発サーバーの`/viewer.html`から利用する。エディターで書き出したGLBを選び、「TSL投影／標準表示」と「基準カメラ／配置確認」を切り替えられる。編集JSONやエディター側モジュールは読み込まない。ビルド時は`dist/viewer.html`も出力する。操作と制限は[GLBからの投影表示の復元](./glb-projection.md)を参照。ブラウザー確認は未実施。
+開発サーバーの`/viewer.html`から利用する。エディターで書き出したGLBをTSLで表示し、「基準カメラ／配置確認」を切り替えられる。編集JSONやエディター側モジュールは読み込まない。ビルド時は`dist/viewer.html`も出力する。操作と制限は[GLBからの投影表示の復元](./glb-projection.md)を参照。ブラウザー確認は未実施。
 
-再利用時は`src/glb-projection.ts`から`parseProjectionGlb`または`restoreProjectionAsset`をimportする。前者はバッファ読み込みからTSL適用と全リソースの管理、後者は呼び出し側が管理する既存シーンへの適用を担当する。モジュールはDOMやエディターに依存しない。利用例と所有権は[GLBからの投影表示の復元](./glb-projection.md)を参照。
+再利用時は`src/glb-projection.ts`から`applyCameraProjection`をimportし、GLTFLoaderで読み込んだsceneを渡す。呼び出し時にTSLを適用し、投影行列の更新と生成したマテリアルの解放を提供する。元のGLBリソース管理と読み込みは呼び出し側の責務。TSL以外の表示切り替え、独自ソート、明示的な事前コンパイルは設けない。モジュールはDOM・Loader・エディターに依存しない。最小例は[GLBからの投影表示の復元](./glb-projection.md)を参照。

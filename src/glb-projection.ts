@@ -1,14 +1,12 @@
-/** Reusable GLB projection loader. Copy this file with Three.js; no editor, UI or Vite dependency. */
+/** Apply camera-projection TSL to a loaded GLB scene. Copy this file with Three.js; no editor, UI or Vite dependency. */
 import * as THREE from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 import { Fn, clamp, context, materialReference, max, positionWorld, uniform, uv, vec2, vec4 } from 'three/tsl'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 /** Consumer-side metadata contract; independent of editor types. */
 const EXTRAS = 'threeLayeredScene'
-export type ProjectionMode = 'tsl' | 'standard'
-export type Sampling = { mode: 'uv'; texCoord: 0 } | { mode: 'camera'; cameraId: string; imageUvScale: [number, number]; imageUvOffset: [number, number] }
-export interface LayerInfo { layerId: string; listIndex: number; sampling: Sampling }
+type Sampling = { mode: 'uv'; texCoord: 0 } | { mode: 'camera'; cameraId: string; imageUvScale: [number, number]; imageUvOffset: [number, number] }
+interface LayerInfo { layerId: string; listIndex: number; sampling: Sampling }
 function fail(message: string): never { throw new Error(message) }
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('extrasの構造が不正です。')
@@ -68,7 +66,7 @@ function createProjectionMaterial(original: MapMaterial, sampling: Sampling, mat
   return material
 }
 
-export interface ProjectionBinding {
+interface ProjectionBinding {
   mesh: THREE.Mesh
   original: MapMaterial
   projected: THREE.MeshBasicNodeMaterial
@@ -76,19 +74,18 @@ export interface ProjectionBinding {
 }
 
 /** Borrows the source scene. dispose() only restores materials and frees generated TSL materials. */
-export interface ProjectionAsset {
+export interface CameraProjection {
   scene: THREE.Object3D
   camera: THREE.PerspectiveCamera
   matrix: THREE.Matrix4
   bindings: ProjectionBinding[]
   composition: { width: number; height: number }
   updateProjection(): void
-  setMode(mode: ProjectionMode): void
   dispose(): void
 }
 
 /** Does not need the editor model, original image dimensions, or any external JSON. */
-export function restoreProjectionAsset(scene: THREE.Object3D): ProjectionAsset {
+export function applyCameraProjection(scene: THREE.Object3D): CameraProjection {
   const data = metadata(scene.userData[EXTRAS], 'scene'), composition = record(data.composition)
   const projection = record(data.projection), rendering = record(data.rendering)
   if (![composition.width, composition.height].every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 1 && n <= 16384)) fail('共通キャンバスの寸法が不正です。')
@@ -135,93 +132,15 @@ export function restoreProjectionAsset(scene: THREE.Object3D): ProjectionAsset {
   try {
     for (const value of pending) bindings.push({ ...value, projected: createProjectionMaterial(value.original, value.info.sampling, matrix) })
   } catch (error) { bindings.forEach(binding => binding.projected.dispose()); throw error }
+  bindings.forEach(binding => { binding.mesh.material = binding.projected })
   return {
     scene, camera, matrix, bindings,
     composition: { width: composition.width as number, height: composition.height as number },
     updateProjection,
-    setMode(mode: ProjectionMode) {
-      if (disposed) fail('投影アセットは解放済みです。')
-      bindings.forEach(binding => { binding.mesh.material = mode === 'tsl' ? binding.projected : binding.original })
-    },
     dispose() {
       if (disposed) return
       disposed = true
       bindings.forEach(binding => { binding.mesh.material = binding.original; binding.projected.dispose() })
-    },
-  }
-}
-
-/** Keep depth sorting; the published list order only breaks ties at equal rendering depth. */
-export function projectionRenderSort(transparent: boolean) {
-  type Item = { id: number | null; groupOrder: number | null; renderOrder: number | null; z: number | null; object: THREE.Object3D | null }
-  return (a: Item, b: Item) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0) || (a.renderOrder ?? 0) - (b.renderOrder ?? 0)
-    || (transparent ? (b.z ?? 0) - (a.z ?? 0) : (a.z ?? 0) - (b.z ?? 0))
-    || (a.object?.userData[EXTRAS]?.listIndex ?? -1) - (b.object?.userData[EXTRAS]?.listIndex ?? -1) || (a.id ?? 0) - (b.id ?? 0)
-}
-
-export const MAX_PROJECTION_GLB_BYTES = 400 * 1024 * 1024
-export interface ProjectionLoadOptions {
-  /** Optional preconfigured loader, for custom decoding or loading-manager policies. */
-  loader?: Pick<GLTFLoader, 'parseAsync'>
-}
-export interface LoadedProjectionAsset extends ProjectionAsset {
-  /** Detach scene and free source resources as well as generated TSL materials. Idempotent. */
-  dispose(): void
-}
-
-function disposeScene(scene: THREE.Object3D) {
-  const materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>(), geometries = new Set<THREE.BufferGeometry>()
-  scene.traverse(object => {
-    if (object instanceof THREE.Mesh) {
-      geometries.add(object.geometry)
-      const list = Array.isArray(object.material) ? object.material : [object.material]
-      list.forEach(material => materials.add(material))
-    }
-  })
-  materials.forEach(material => {
-    Object.values(material).forEach(value => { if (value?.isTexture) textures.add(value) })
-    material.dispose()
-  })
-  const images = new Set<{ close?: () => void }>()
-  textures.forEach(texture => { if (texture.image) images.add(texture.image); texture.dispose() })
-  images.forEach(image => { image.close?.() }); geometries.forEach(geometry => geometry.dispose())
-}
-/** Load a self-contained GLB and apply TSL. Fetch/File/renderer/camera controls belong to the caller. */
-export async function parseProjectionGlb(data: ArrayBuffer, options: ProjectionLoadOptions = {}): Promise<LoadedProjectionAsset> {
-  if (data.byteLength > MAX_PROJECTION_GLB_BYTES) throw new Error('GLBは400MB以下にしてください。')
-  if (data.byteLength < 12) throw new Error('GLBファイルを指定してください。')
-  const header = new DataView(data)
-  if (header.getUint32(0, true) !== 0x46546c67 || header.getUint32(4, true) !== 2 || header.getUint32(8, true) !== data.byteLength) {
-    throw new Error('GLBヘッダーが不正です。')
-  }
-  let loader = options.loader
-  if (!loader) {
-    const manager = new THREE.LoadingManager()
-    manager.setURLModifier(url => {
-      if (!url.startsWith('blob:') && !url.startsWith('data:')) throw new Error('外部ファイル参照のあるGLBには対応していません。')
-      return url
-    })
-    loader = new GLTFLoader(manager)
-  }
-  const gltf = await loader.parseAsync(data, '')
-  let projection: ProjectionAsset | undefined
-  try {
-    projection = restoreProjectionAsset(gltf.scene)
-    projection.setMode('tsl')
-  } catch (error) {
-    projection?.dispose()
-    disposeScene(gltf.scene)
-    throw error
-  }
-  let disposed = false
-  return {
-    ...projection,
-    dispose() {
-      if (disposed) return
-      disposed = true
-      projection.dispose()
-      gltf.scene.removeFromParent()
-      disposeScene(gltf.scene)
     },
   }
 }

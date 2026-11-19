@@ -1,25 +1,43 @@
-/** Demo UI; GLB loading and projection are reusable independently in ./glb-projection. */
+/** Demo UI; Camera projection is reusable independently in ./glb-projection. */
 import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { MAX_PROJECTION_GLB_BYTES, parseProjectionGlb, projectionRenderSort } from './glb-projection'
-import type { LoadedProjectionAsset, ProjectionMode } from './glb-projection'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { applyCameraProjection } from './glb-projection'
+import type { CameraProjection } from './glb-projection'
+
+function disposeScene(scene: THREE.Object3D) {
+  const materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>(), geometries = new Set<THREE.BufferGeometry>()
+  scene.traverse(object => {
+    if (object instanceof THREE.Mesh) {
+      geometries.add(object.geometry)
+      const list = Array.isArray(object.material) ? object.material : [object.material]
+      list.forEach(material => materials.add(material))
+    }
+  })
+  materials.forEach(material => {
+    Object.values(material).forEach(value => { if (value?.isTexture) textures.add(value) })
+    material.dispose()
+  })
+  const images = new Set<{ close?: () => void }>()
+  textures.forEach(texture => { if (texture.image) images.add(texture.image); texture.dispose() })
+  images.forEach(image => { image.close?.() }); geometries.forEach(geometry => geometry.dispose())
+}
 
 async function startViewer(canvas: HTMLCanvasElement) {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
   const status = (text: string, error = false) => { get('viewer-status').textContent = text; get('viewer-status').classList.toggle('error', error) }
   const open = get<HTMLButtonElement>('viewer-open'), fileInput = get<HTMLInputElement>('viewer-file')
-  const mode = get<HTMLSelectElement>('viewer-mode'), view = get<HTMLSelectElement>('viewer-view'), reset = get<HTMLButtonElement>('viewer-reset')
-  let disposed = false, compiling = false, revision = 0, frame = 0, current: LoadedProjectionAsset | undefined
+  const view = get<HTMLSelectElement>('viewer-view'), reset = get<HTMLButtonElement>('viewer-reset')
+  let disposed = false, revision = 0, frame = 0, current: CameraProjection | undefined
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#17212a')
   const camera = new THREE.PerspectiveCamera(), renderer = new THREE.WebGPURenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.NoToneMapping
-  renderer.setOpaqueSort(projectionRenderSort(false)); renderer.setTransparentSort(projectionRenderSort(true))
   const controls = new OrbitControls(camera, canvas); controls.enabled = false
   const requestRender = () => {
-    if (disposed || compiling || frame) return
+    if (disposed || frame) return
     frame = requestAnimationFrame(() => {
       frame = 0
-      if (disposed || compiling) return
+      if (disposed) return
       try { current?.updateProjection(); renderer.render(scene, camera) }
       catch (error) { status(error instanceof Error ? error.message : '描画できませんでした。', true) }
     })
@@ -54,7 +72,7 @@ async function startViewer(canvas: HTMLCanvasElement) {
   const observer = new ResizeObserver(fit)
   const destroy = () => {
     disposed = true; revision++; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose()
-    current?.dispose()
+    if (current) { current.dispose(); current.scene.removeFromParent(); disposeScene(current.scene) }
     void renderer.dispose().catch(() => {})
   }
   if (import.meta.hot) import.meta.hot.dispose(destroy)
@@ -64,38 +82,34 @@ async function startViewer(canvas: HTMLCanvasElement) {
   if (disposed) return
   open.disabled = false; observer.observe(get('viewer-area')); fit()
   open.onclick = () => { fileInput.value = ''; fileInput.click() }
-  mode.onchange = () => { current?.setMode(mode.value as ProjectionMode); requestRender() }
   view.onchange = resetCamera; reset.onclick = resetCamera
   fileInput.onchange = async () => {
     const file = fileInput.files?.[0]
     if (!file) return
     const token = ++revision
-    let candidate: LoadedProjectionAsset | undefined
+    let candidateScene: THREE.Object3D | undefined, candidate: CameraProjection | undefined
     open.disabled = true; status('GLBを読み込み中…')
     try {
-      if (file.size > MAX_PROJECTION_GLB_BYTES) throw new Error('GLBは400MB以下にしてください。')
-      candidate = await parseProjectionGlb(await file.arrayBuffer())
+      if (file.size > 400 * 1024 * 1024) throw new Error('GLBは400MB以下にしてください。')
+      const bytes = await file.arrayBuffer()
+      if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) throw new Error('GLBファイルを選択してください。')
+      const manager = new THREE.LoadingManager()
+      manager.setURLModifier(url => {
+        if (!url.startsWith('blob:') && !url.startsWith('data:')) throw new Error('外部ファイル参照のあるGLBには対応していません。')
+        return url
+      })
+      candidateScene = (await new GLTFLoader(manager).parseAsync(bytes, '')).scene
       if (disposed || token !== revision) return
-      // Compile before replacing the visible asset; shader failures leave it intact.
-      const temporary = new THREE.Scene(); temporary.add(candidate.scene)
-      const compileCamera = candidate.camera.clone()
-      candidate.camera.matrixWorld.decompose(compileCamera.position, compileCamera.quaternion, compileCamera.scale)
-      candidate.updateProjection()
-      compiling = true
-      candidate.setMode('tsl'); await renderer.compileAsync(temporary, compileCamera)
-      candidate.setMode('standard'); await renderer.compileAsync(temporary, compileCamera)
-      if (disposed || token !== revision) return
-      candidate.setMode(mode.value as ProjectionMode)
+      candidate = applyCameraProjection(candidateScene)
       const previous = current
-      scene.add(candidate.scene); current = candidate; candidate = undefined
-      previous?.dispose()
-      mode.disabled = false; view.disabled = false; reset.disabled = false
+      scene.add(candidate.scene); current = candidate; candidate = undefined; candidateScene = undefined
+      if (previous) { previous.dispose(); previous.scene.removeFromParent(); disposeScene(previous.scene) }
+      view.disabled = false; reset.disabled = false
       resetCamera(); fit(); status(''); get('viewer-filename').textContent = file.name
     } catch (error) {
       if (!disposed && token === revision) status(error instanceof Error ? error.message : 'GLBを読み込めませんでした。', true)
     } finally {
-      compiling = false
-      candidate?.dispose()
+      candidate?.dispose(); if (candidateScene) disposeScene(candidateScene)
       if (!disposed && token === revision) { open.disabled = false; requestRender() }
     }
   }
