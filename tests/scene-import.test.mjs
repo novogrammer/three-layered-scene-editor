@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest'
 import { createSceneDocument } from '../src/scene-json.ts'
 import { parseSceneDocument, prepareSceneImport } from '../src/scene-import.ts'
-import { changeOrientation, createLayerModel, defaultSettings, initialLayers, orientationFor, setFrontRect } from '../src/model.ts'
+import { changeOrientation, createLayerModel, defaultSettings, initialLayers, orientationFor, referenceMetrics, setFrontRect, validateScenePlacement } from '../src/model.ts'
 import { assertImageFitsGpu } from '../src/gpu-texture.ts'
 
 const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 255])
@@ -11,6 +11,66 @@ async function document() {
   return createSceneDocument(defaultSettings, layers, sources)
 }
 const decode = async () => ({ width: 1920, height: 1080 })
+
+test.each([
+  ['small reference height', { referenceHeight: 0.01 }, () => {}],
+  ['large reference height', { referenceHeight: 1000 }, () => {}],
+  ['narrow FOV', { fov: 1 }, () => {}],
+  ['wide FOV', { fov: 179 }, () => {}],
+  ['large screen rectangle', {}, data => { data.placement.rectPx = { x: -1e6, y: 1e6, width: 1e6, height: 2e6 } }],
+  ['tiny positive rectangle', {}, data => { data.placement.rectPx.width = 1e-6; data.placement.rectPx.height = 1e-6 }],
+  ['distant depth', {}, data => { data.placement.zPx = -1e6 }],
+  ['depth just beyond the near plane', {}, data => {
+    const metrics = referenceMetrics(defaultSettings)
+    data.placement.zPx = (metrics.cameraZ - metrics.near - 1e-6) / metrics.scale
+  }],
+  ['large placement origin', {}, data => { data.originPx.x = 1e6; data.originPx.y = -1e6 }],
+])('%s is accepted by the UI validator and JSON round-trip with the same exact data', async (_, patch, edit) => {
+  const settings = { ...defaultSettings, ...patch }
+  const data = structuredClone(initialLayers(defaultSettings)[0])
+  data.placement.zPx = 0
+  edit(data)
+  const layer = createLayerModel(settings, data)
+  expect(() => validateScenePlacement(settings, [layer])).not.toThrow()
+  const sources = new Map([[layer.id, { fileName: 'image.png', blob: new Blob([bytes], { type: 'image/png' }) }]])
+  const doc = await createSceneDocument(settings, [layer], sources)
+  const restored = await prepareSceneImport(JSON.stringify(doc), decode)
+  expect(restored.settings).toEqual(settings)
+  expect(structuredClone(restored.layers[0])).toEqual(data)
+})
+
+test.each(['down', 'up', 'left', 'right'])('%s accepts large surface ranges and small positive sizes through both validation paths', async direction => {
+  const data = structuredClone(changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(direction)))
+  Object.assign(data.placement, { centerPx: 1e6, sizePx: 1e-6, frontZPx: 1e6, backZPx: -1e6 })
+  data.originPx = { x: 1e6, y: -1e6, z: 0 }
+  const layer = createLayerModel(defaultSettings, data)
+  expect(() => validateScenePlacement(defaultSettings, [layer])).not.toThrow()
+  const sources = new Map([[layer.id, { fileName: 'image.png', blob: new Blob([bytes], { type: 'image/png' }) }]])
+  const doc = await createSceneDocument(defaultSettings, [layer], sources)
+  const restored = await prepareSceneImport(JSON.stringify(doc), decode)
+  expect(structuredClone(restored.layers[0])).toEqual(data)
+})
+
+test.each([
+  ['zero reference height', d => { d.referencePlane.height = 0 }],
+  ['negative reference height', d => { d.referencePlane.height = -1 }],
+  ['zero FOV', d => { d.projectionCamera.fov = 0 }],
+  ['180 degree FOV', d => { d.projectionCamera.fov = 180 }],
+  ['overflowing placement', d => { d.layers[0].placement.rectPx.x = 1e300 }],
+  ['underflowing size', d => { d.layers[0].placement.rectPx.width = 1e-100 }],
+  ['camera near crossing', d => { d.layers[0].placement.zPx = 2000 }],
+  ['zero size', d => { d.layers[0].placement.rectPx.width = 0 }],
+])('%s is rejected by both UI and JSON validation, preserving the original scene', async (_, edit) => {
+  const doc = await document()
+  edit(doc)
+  const settings = { ...doc.composition, referenceHeight: doc.referencePlane.height, fov: doc.projectionCamera.fov }
+  const current = initialLayers(defaultSettings), before = structuredClone(current)
+  const candidate = structuredClone(current[0])
+  candidate.placement = structuredClone(doc.layers[0].placement)
+  expect(() => validateScenePlacement(settings, [createLayerModel(settings, candidate)])).toThrow()
+  await expect(prepareSceneImport(JSON.stringify(doc), decode)).rejects.toThrow()
+  expect(structuredClone(current)).toEqual(before)
+})
 
 test('save/import/save preserves the full document, source bytes, list order and exact pixel inputs', async () => {
   const doc = await document()

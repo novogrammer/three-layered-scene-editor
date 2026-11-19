@@ -262,13 +262,37 @@ export function referenceMetrics(settings: SceneSettings) {
     || width <= 0 || height <= 0 || referenceHeight <= 0 || fov <= 0 || fov >= 180) {
     throw new Error('解像度・基準高さは正の値、FOVは0°より大きく180°未満で指定してください。')
   }
-  return {
+  const metrics = {
     width: referenceHeight * width / height,
     height: referenceHeight,
     scale: referenceHeight / height,
     cameraZ: referenceHeight / (2 * Math.tan(fov * Math.PI / 360)),
     aspect: width / height,
     near: Math.max(0.001, referenceHeight / 1000),
+  }
+  if (!Object.values(metrics).every(n => Number.isFinite(n) && n > 0)) {
+    throw new Error('基準設定を3Dに変換できません。')
+  }
+  return metrics
+}
+
+/** The same numeric conditions apply before committing UI edits or importing JSON. */
+export function validateScenePlacement(settings: SceneSettings, layers: readonly Layer[]) {
+  const metrics = referenceMetrics(settings)
+  for (const layer of layers) {
+    const p = layer.placement, t = layer.transform, origin = layer.origin
+    const sourceValues = p.type === 'screen'
+      ? [...Object.values(p.rectPx), p.zPx] : [p.centerPx, p.sizePx, p.frontZPx, p.backZPx]
+    assertFinite(...Object.values(layer.originPx), ...sourceValues)
+    if (layer.originPx.z !== 0) throw new Error('配置基準点のZは0にしてください。')
+    if (p.type === 'surface' && p.frontZPx <= p.backZPx) throw new Error('手前端Zは奥端Zより大きい値にしてください。')
+    // Reading a screen transform also checks that it stays beyond the near plane.
+    const far = metrics.cameraZ + 2 * (Math.hypot(t.x, t.y, t.z) + Math.hypot(t.width, t.height))
+    if (![t.x, t.y, t.z, t.width, t.height, origin.x, origin.y, t.x - origin.x, t.y - origin.y, far]
+      .every(n => Number.isFinite(n) && Number.isFinite(Math.fround(n)))
+      || Math.fround(t.width) <= 0 || Math.fround(t.height) <= 0) {
+      throw new Error('配置を3Dに変換できません。')
+    }
   }
 }
 

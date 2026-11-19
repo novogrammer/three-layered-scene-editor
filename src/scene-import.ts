@@ -1,4 +1,4 @@
-import { createLayerModel, referenceMetrics } from './model'
+import { createLayerModel, referenceMetrics, validateScenePlacement } from './model'
 import type { LayerData, SceneSettings } from './model'
 import type { ImageAssetV1, SceneDocumentV1, SceneLayerV1 } from './scene-document'
 
@@ -69,8 +69,8 @@ export function parseSceneDocument(text: string): SceneDocumentV1 {
   if (v.schemaVersion !== 1) invalid('対応していない保存形式のバージョンです。')
   const c = object(v.composition), r = object(v.referencePlane), camera = object(v.projectionCamera), projection = object(v.projection)
   const width = number(c.width), height = number(c.height), referenceHeight = number(r.height), fov = number(camera.fov)
-  if (![width, height].every(n => Number.isSafeInteger(n) && n >= 1)
-    || referenceHeight < 0.1 || referenceHeight > 100 || fov < 5 || fov > 140) invalid('基準設定が入力可能な範囲外です。')
+  try { referenceMetrics({ width, height, referenceHeight, fov }) }
+  catch (error) { invalid(error instanceof Error ? error.message : '基準設定が不正です。') }
   if (projection.imageFit !== 'cover' || projection.imageAlign !== 'center' || projection.outsideImage !== 'clamp') invalid('投影設定が未対応です。')
   const layers = array(v.layers).map(layer), assets = array(v.assets).map(asset)
   unique(layers.map(l => l.id)); unique(assets.map(a => a.id))
@@ -106,17 +106,8 @@ function editableLayer(value: SceneLayerV1): LayerData {
 export async function prepareSceneImport<T extends { width: number; height: number }>(text: string, decode: (blob: Blob) => Promise<T>) {
   const doc = parseSceneDocument(text)
   const settings: SceneSettings = { ...doc.composition, referenceHeight: doc.referencePlane.height, fov: doc.projectionCamera.fov }
-  const metrics = referenceMetrics(settings)
   const layers = doc.layers.map(value => createLayerModel(settings, editableLayer(value)))
-  for (const layer of layers) {
-    const t = layer.transform, origin = layer.origin
-    const far = metrics.cameraZ + 2 * (Math.hypot(t.x, t.y, t.z) + Math.hypot(t.width, t.height))
-    if (![t.x, t.y, t.z, t.width, t.height, origin.x, origin.y, t.x - origin.x, t.y - origin.y, far]
-      .every(n => Number.isFinite(n) && Number.isFinite(Math.fround(n)))
-      || Math.fround(t.width) <= 0 || Math.fround(t.height) <= 0) invalid('配置を3Dに変換できません。')
-    // Force validation of camera-side depth through the screen-placement getter above.
-    if (layer.placement.type === 'screen' && t.z >= metrics.cameraZ - metrics.near) invalid('面がカメラに近すぎます。')
-  }
+  validateScenePlacement(settings, layers)
   const decoded = new Map<string, { image: T; blob: Blob; fileName: string }>()
   for (const value of doc.assets) {
     const blob = imageBlob(value), image = await decode(blob)

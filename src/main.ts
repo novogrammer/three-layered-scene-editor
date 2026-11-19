@@ -10,7 +10,7 @@ import { imageAspectNotice } from './image-aspect'
 import { assertImageFitsGpu } from './gpu-texture'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
+import { changeOrientation, createLayerModel, validateScenePlacement, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
 import type { DiagnosticMode } from './projection'
 import type { Layer, PlacementPolicy, PlacementUnit, PlaneDirection, SceneSettings } from './model'
 
@@ -34,6 +34,7 @@ const imageRequests = new Map<string, symbol>()
 const textureMap = () => new Map([...assets].map(([id, asset]) => [id, asset.texture]))
 
 function replaceLayer(updated: Layer) {
+  validateScenePlacement(settings, [updated])
   layers = layers.map(layer => layer.id === updated.id ? updated : layer)
 }
 let editor: Editor
@@ -156,14 +157,13 @@ function renderList() {
   updateAddButton()
 }
 
-function numberField(parent: HTMLElement, label: string, value: number, onChange: (value: number) => void,
-  min = -1000, max = 1000, step = 'any') {
+function numberField(parent: HTMLElement, label: string, value: number, onChange: (value: number) => void) {
   const wrapper = document.createElement('label')
   wrapper.textContent = label
   const input = document.createElement('input')
   input.type = 'number'
-  input.value = String(Number(value.toFixed(4)))
-  input.min = String(min); input.max = String(max); input.step = step
+  input.value = String(value)
+  input.step = 'any'
   input.required = true
   wrapper.append(input); parent.append(wrapper)
   input.onchange = () => {
@@ -280,7 +280,7 @@ function renderPanel() {
   const parallel = layer.orientation.relation === 'parallel'
 
   function placementFields(parent: HTMLElement, unit: PlacementUnit) {
-    const px = unit === 'px', factor = px ? 1 / metrics.scale : 1
+    const px = unit === 'px'
     const grid = document.createElement('div'); grid.className = 'pair'; parent.append(grid)
     if (parallel) {
       if (layer!.placement.type !== 'screen') throw new Error('正面レイヤーの配置方式が一致していません。')
@@ -288,9 +288,12 @@ function renderPanel() {
       for (const [key, name] of [['x', px ? 'X' : '位置X'], ['y', px ? 'Y' : '位置Y'], ['width', '幅'], ['height', '高さ']] as const) {
         const input = numberField(grid, name, px ? rect[key] : layer!.transform[key], value => {
           if (px) replaceLayer(setFrontRect(layer!, { ...rect, [key]: value }))
-          else layer!.transform[key] = value
-        }, key === 'width' || key === 'height' ? (px ? 0 : 0.01) : (px ? -Number.MAX_SAFE_INTEGER : -500),
-        px ? Number.MAX_SAFE_INTEGER : 500)
+          else {
+            const updated = createLayerModel(settings, layer!)
+            updated.transform[key] = value
+            replaceLayer(updated)
+          }
+        })
         input.setAttribute('aria-label', `${px ? '2D配置' : '3D配置'} ${name} ${px ? 'px' : 'シーン単位'}`)
       }
       if (px) {
@@ -303,17 +306,16 @@ function renderPanel() {
       }
       const zInput = numberField(parent, '奥行きZ', px ? layer!.placement.zPx : layer!.transform.z, value => {
         replaceLayer(px ? setFrontDepthPx(layer!, value, depthPolicy) : setFrontDepth(layer!, value, depthPolicy))
-      }, -500 * factor, (metrics.cameraZ - metrics.near - 0.001) * factor)
+      })
       zInput.setAttribute('aria-label', `奥行きZ ${px ? 'px相当' : 'シーン単位'}`)
       coordinateHint(zInput.parentElement!, '基準面 Z = 0', `reference-z-${unit}`, [zInput])
     } else {
       const values = surfacePlacementValues(layer!, unit), wall = isWall(layer!)
       for (const [key, name] of [['center', wall ? '中心Y' : '中心X'], ['size', wall ? '高さ' : '幅'],
         ['frontZ', '手前端Z'], ['backZ', '奥端Z']] as const) {
-        const depth = key === 'frontZ' || key === 'backZ'
         const input = numberField(grid, name, values[key], value => {
           replaceLayer(setSurfacePlacementValue(layer!, unit, key, value))
-        }, (key === 'size' ? 0.01 : depth ? -1000 : -500) * factor, (depth ? 1000 : 500) * factor)
+        })
         input.setAttribute('aria-label', `${name} ${px ? 'px相当' : 'シーン単位'}`)
       }
       const depthInputs = [...grid.querySelectorAll<HTMLInputElement>('input')].slice(2)
@@ -322,7 +324,7 @@ function renderPanel() {
   }
 
   function originFields(parent: HTMLElement, unit: PlacementUnit) {
-    const px = unit === 'px', factor = px ? 1 / metrics.scale : 1
+    const px = unit === 'px'
     const title = document.createElement('h2'); title.textContent = px ? '配置基準点 · px' : '配置基準点'
     title.title = '基準点を動かすと、面も同じ量だけ移動します。Zは0です。'
     parent.append(title)
@@ -332,7 +334,7 @@ function renderPanel() {
       const input = numberField(grid, key.toUpperCase(), px ? layer!.originPx[key] : layer!.origin[key], value => {
         replaceLayer(px ? moveOriginPx(layer!, key === 'x' ? value : layer!.originPx.x, key === 'y' ? value : layer!.originPx.y)
           : moveOrigin(layer!, key === 'x' ? value : layer!.origin.x, key === 'y' ? value : layer!.origin.y))
-      }, -500 * factor, 500 * factor)
+      })
       input.setAttribute('aria-label', `配置基準点 ${key.toUpperCase()} ${px ? 'px相当' : 'シーン単位'}`)
       inputs.push(input)
     }
@@ -577,6 +579,7 @@ async function start() {
       try {
         referenceMetrics(next)
         const updated = reconfigureScene(settings, next, layers, settingsPolicy)
+        validateScenePlacement(next, updated)
         settings = next; layers = updated
         refreshScene()
         status('設定を適用しました。')
