@@ -4,8 +4,8 @@ import { Texture, Vector3 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { createSceneGlb } from '../src/scene-glb.ts'
 import { readGlb } from '../src/glb-container.ts'
-import { initialLayers, defaultSettings, referenceMetrics, changeOrientation, orientationFor, createLayerModel, setSurfacePlacementValue } from '../src/model.ts'
-import { centeredCover } from '../src/image-fit.ts'
+import { initialLayers, defaultSettings, geometryTransform, referenceMetrics, changeOrientation, orientationFor, createLayerModel, setSurfacePlacementValue } from '../src/model.ts'
+import { projectedCover } from '../src/image-fit.ts'
 import { GLB_PROJECTION_EXTRAS_KEY as extrasKey } from '../src/glb-projection-extras.ts'
 
 // GLTFExporter uses FileReader for binary packaging; no browser or canvas is needed here.
@@ -45,9 +45,9 @@ test('demo GLB embeds original files byte for byte with unlit materials, alpha m
   expect(json.extensionsUsed).not.toContain('EXT_texture_webp')
   expect(json.extensionsUsed).not.toContain('KHR_texture_basisu')
   const sceneInfo = json.scenes[json.scene].extras[extrasKey]
-  expect(sceneInfo).toMatchObject({ version: 1, role: 'scene', composition: { width: 1920, height: 1080 }, rendering: { toneMapping: 'none' } })
+  expect(sceneInfo).toMatchObject({ version: 2, role: 'scene', composition: { width: 1920, height: 1080 }, rendering: { toneMapping: 'none' } })
   const cameraInfo = json.nodes.find(node => node.camera !== undefined).extras[extrasKey]
-  expect(cameraInfo).toEqual({ version: 1, role: 'projectionCamera', id: sceneInfo.projectionCameraId })
+  expect(cameraInfo).toEqual({ version: 2, role: 'projectionCamera', id: sceneInfo.projectionCameraId })
   for (const node of json.nodes.filter(node => node.mesh !== undefined)) {
     expect(node.extras[extrasKey].role).toBe('layer')
     expect(layers.some(layer => layer.id === node.extras[extrasKey].layerId)).toBe(true)
@@ -69,7 +69,8 @@ test('demo GLB embeds original files byte for byte with unlit materials, alpha m
   expect(structuredClone(layers)).toEqual(before)
 })
 
-test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('Three.js reads exported geometry and its vertex UVs match the projection and cover', async settings => {
+test.each([[defaultSettings, false], [{ ...defaultSettings, width: 1080, height: 1920, fov: 60 }, false],
+  [defaultSettings, true]])('Three.js reads exported geometry and its vertex UVs match the projection and cover', async (settings, expanded) => {
   const initial = initialLayers(settings), layers = [initial[0]]
   for (const direction of ['down', 'up', 'left', 'right']) {
     let surface = changeOrientation(settings, initial[2], orientationFor(direction))
@@ -79,6 +80,7 @@ test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov
     data.id = direction; data.name = direction
     layers.push(createLayerModel(settings, data))
   }
+  if (expanded) layers.forEach(layer => { layer.framePx = { width: settings.width * 1.4, height: settings.height * 1.25 } })
   const sources = await sourcesFor(layers), buffer = await createSceneGlb(settings, layers, sources)
   const loaded = await loadGeometry(buffer)
   loaded.scene.updateMatrixWorld(true)
@@ -96,7 +98,7 @@ test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov
     const info = mesh.userData[extrasKey]
     const layer = layers.find(layer => layer.id === info.layerId)
     expect(layer).toBeDefined()
-    expect(info).toMatchObject({ version: 1, role: 'layer' })
+    expect(info).toMatchObject({ version: 2, role: 'layer' })
     const position = mesh.geometry.getAttribute('position'), uv = mesh.geometry.getAttribute('uv')
     const parallel = layer.orientation.relation === 'parallel'
     expect(position.count).toBe(parallel ? 4 : 81)
@@ -105,11 +107,12 @@ test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov
       expect(new Set(Array.from({ length: position.count }, (_, i) => position.getX(i))).size).toBe(9)
       expect(new Set(Array.from({ length: position.count }, (_, i) => position.getY(i))).size).toBe(9)
     }
-    const center = mesh.getWorldPosition(new Vector3())
-    expect(center.x).toBeCloseTo(layer.transform.x, 10)
-    expect(center.y).toBeCloseTo(layer.transform.y, 10)
-    expect(center.z).toBeCloseTo(layer.transform.z, 10)
-    const fit = centeredCover(sources.get(layer.id).image, settings).uv
+    const center = mesh.getWorldPosition(new Vector3()), actual = geometryTransform(layer)
+    expect(center.x).toBeCloseTo(actual.x, 10)
+    expect(center.y).toBeCloseTo(actual.y, 10)
+    expect(center.z).toBeCloseTo(actual.z, 10)
+    expect(info.framePx).toEqual(layer.framePx)
+    const fit = projectedCover(sources.get(layer.id).image, layer.framePx, settings)
     if (parallel) expect(info.sampling).toEqual({ mode: 'uv', texCoord: 0 })
     else expect(info.sampling).toEqual({ mode: 'camera', cameraId: camera.userData[extrasKey].id,
       imageUvScale: [fit.scaleX, fit.scaleY], imageUvOffset: [fit.offsetX, fit.offsetY] })

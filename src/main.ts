@@ -8,9 +8,9 @@ import { createSceneGlb } from './scene-glb'
 import type { ImageSource } from './scene-json'
 import { imageAspectNotice } from './image-aspect'
 import { assertImageFitsGpu } from './gpu-texture'
-import { centeredCover } from './image-fit'
+import { compositionImageRects } from './image-fit'
 import { compositionLayers, createLayer, moveLayer, removeLayer } from './layer-collection'
-import { changeOrientation, createLayerModel, validateScenePlacement, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
+import { changeOrientation, createLayerModel, geometryTransform, setLayerFrame, validateScenePlacement, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
 import type { DiagnosticMode } from './projection'
 import type { Layer, PlacementPolicy, PlacementUnit, PlaneDirection, SceneSettings } from './model'
 
@@ -65,14 +65,18 @@ function compare() {
   const scale = Math.min(1, 2048 / Math.max(settings.width, settings.height))
   source.width = Math.max(1, Math.round(settings.width * scale))
   source.height = Math.max(1, Math.round(settings.height * scale))
+  const scaleX = source.width / settings.width, scaleY = source.height / settings.height
   const ctx = source.getContext('2d')!
   ctx.fillStyle = '#17212a'
   ctx.fillRect(0, 0, source.width, source.height)
   for (const layer of compositionLayers(layers)) {
     if (!layer.visible) continue
     const image = assets.get(layer.id)!.image
-    const crop = centeredCover({ width: image.naturalWidth, height: image.naturalHeight }, settings).source
-    ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, source.width, source.height)
+    const patches = compositionImageRects({ width: image.naturalWidth, height: image.naturalHeight }, layer.framePx, settings)
+    for (const { source: crop, target } of patches) {
+      ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height,
+        target.x * scaleX, target.y * scaleY, target.width * scaleX, target.height * scaleY)
+    }
   }
 }
 
@@ -93,7 +97,7 @@ function updateSceneView(updateEditor = true) {
   if (updateEditor) editor.update(settings, layers, textureMap())
   const metrics = referenceMetrics(settings)
   get('camera-info').textContent = `基準平面 ${metrics.width.toFixed(3)} × ${metrics.height.toFixed(3)} / カメラZ +${metrics.cameraZ.toFixed(3)}`
-  const warning = layers.some((layer) => layer.transform.z >= metrics.cameraZ - metrics.near)
+  const warning = layers.some((layer) => geometryTransform(layer).z >= metrics.cameraZ - metrics.near)
   if (warning) status('カメラに近すぎるPlaneがあります。FOVを狭くするか、Planeを奥へ移動してください。', true)
   compare()
   fitStages()
@@ -249,7 +253,7 @@ function renderPanel() {
   const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = `${asset.fileName} / ${asset.image.width} × ${asset.image.height}`
   panel.append(fileInfo)
   const image = asset.image
-  const aspectMessage = imageAspectNotice({ width: image.naturalWidth, height: image.naturalHeight }, settings)
+  const aspectMessage = imageAspectNotice({ width: image.naturalWidth, height: image.naturalHeight }, layer.framePx)
   if (aspectMessage) {
     const notice = document.createElement('p')
     notice.id = 'image-aspect-notice'
@@ -260,6 +264,16 @@ function renderPanel() {
     panel.append(notice)
   }
   input.onchange = () => { const file = input.files?.[0]; if (file) void loadImage(file, layer.id) }
+  const frameTitle = document.createElement('h2'); frameTitle.textContent = '仮想枠 · px'
+  frameTitle.title = '共通キャンバス中央に揃える画像の範囲。画像を中央coverし、Planeも連動して拡縮します。'
+  const frameFields = document.createElement('div'); frameFields.className = 'pair'
+  panel.append(frameTitle, frameFields)
+  for (const [key, label] of [['width', '幅'], ['height', '高さ']] as const) {
+    const input = numberField(frameFields, label, layer.framePx[key], value => {
+      replaceLayer(setLayerFrame(layer, { ...layer.framePx, [key]: value }))
+    })
+    input.setAttribute('aria-label', `仮想枠 ${label} px`)
+  }
   const row = document.createElement('div'); row.className = 'layer-options'
   const visibleLabel = document.createElement('label'); visibleLabel.className = 'inline-check'
   const visible = document.createElement('input'); visible.type = 'checkbox'; visible.checked = layer.visible
@@ -348,14 +362,14 @@ function renderPanel() {
   }
 
   const placementTitle = document.createElement('h2'); placementTitle.textContent = '配置 · px'
-  placementTitle.title = parallel
+  placementTitle.title = '仮想枠の拡張前の配置。' + (parallel
     ? 'X・Y・幅・高さは基準カメラから見た矩形。左上が原点で、Xは右、Yは下が正。Zは基準面の縮尺によるpx相当値です。'
-    : '基準面の縮尺によるpx相当値。基準面中央が原点で、Xは右、Yは上、Zはカメラ側が正です。'
+    : '基準面の縮尺によるpx相当値。基準面中央が原点で、Xは右、Yは上、Zはカメラ側が正です。')
   panel.append(placementTitle)
   placementFields(panel, 'px')
   originFields(panel, 'px')
   const details = document.createElement('details'); details.setAttribute('data-placement-3d', ''); details.open = expanded3D
-  const summary = document.createElement('summary'); summary.textContent = '3D配置'; summary.title = 'シーン単位で編集'
+  const summary = document.createElement('summary'); summary.textContent = '3D配置'; summary.title = '仮想枠の拡張前の配置をシーン単位で編集'
   details.append(summary); panel.append(details)
   placementFields(details, 'scene')
   originFields(details, 'scene')

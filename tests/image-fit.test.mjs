@@ -1,11 +1,32 @@
 import { expect, test } from 'vitest'
-import { centeredCover } from '../src/image-fit.ts'
+import { centeredCover, compositionImageRects, projectedCover } from '../src/image-fit.ts'
 
 test('equal-aspect images keep their full canvas at any pixel resolution', () => {
   expect(centeredCover({ width: 960, height: 540 }, { width: 1920, height: 1080 })).toEqual({
     source: { x: 0, y: 0, width: 960, height: 540 },
     uv: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
   })
+})
+
+test.each([
+  [{ width: 1920, height: 1350 }, { width: 1920, height: 1350 }],
+  [{ width: 1920, height: 1080 }, { width: 1920, height: 1350 }],
+  [{ width: 200, height: 200 }, { width: 960, height: 540 }],
+  [{ width: 1000, height: 1800 }, { width: 2500, height: 1400 }],
+])('Canvas comparison and camera UV use the same centered frame, cover and clamped sampling', (image, frame) => {
+  const composition = { width: 1920, height: 1080 }
+  const fit = projectedCover(image, frame, composition)
+  const patches = compositionImageRects(image, frame, composition)
+  expect(patches.reduce((sum, p) => sum + p.target.width * p.target.height, 0)).toBeCloseTo(1920 * 1080, 5)
+  for (const { source, target } of patches) {
+    for (const axis of ['x', 'y']) {
+      const dimension = axis === 'x' ? 'width' : 'height', suffix = axis.toUpperCase()
+      const position = (target[axis] + target[dimension] / 2) / composition[dimension]
+      const uv = Math.max(0, Math.min(1, position * fit[`scale${suffix}`] + fit[`offset${suffix}`]))
+      const canvas = (source[axis] + source[dimension] / 2) / image[dimension]
+      expect(Math.abs(uv - canvas)).toBeLessThanOrEqual(0.5 / image[dimension] + 1e-12)
+    }
+  }
 })
 
 test.each([

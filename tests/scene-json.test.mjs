@@ -12,14 +12,14 @@ test('demo JSON follows the agreed structure and exports canonical pixels withou
   const layers = initialLayers(defaultSettings), before = structuredClone(layers)
   const data = await createSceneDocument(defaultSettings, layers, sourcesFor(layers))
   expect(Object.keys(data)).toEqual(['schemaVersion', 'composition', 'referencePlane', 'projectionCamera', 'projection', 'layers', 'assets'])
-  expect(data.schemaVersion).toBe(1)
+  expect(data.schemaVersion).toBe(2)
   expect(data.composition).toEqual({ width: 1920, height: 1080 })
   expect(data.referencePlane).toEqual({ height: 5 })
   expect(data.projectionCamera).toEqual({ fov: 45 })
   expect(data.projection).toEqual({ imageFit: 'cover', imageAlign: 'center', outsideImage: 'clamp' })
   expect(data.layers[0]).toEqual({
     id: 'layer-1', name: 'レイヤー 1', imageId: 'image-layer-1', visible: true, editorColor: '#78c5b1', alphaMode: 'BLEND',
-    orientation: { relation: 'parallel', direction: 'front' }, originPx: { x: 0, y: 0, z: 0 },
+    orientation: { relation: 'parallel', direction: 'front' }, originPx: { x: 0, y: 0, z: 0 }, framePx: { width: 1920, height: 1080 },
     placement: { type: 'screen', rectPx: { x: 0, y: 0, width: 1920, height: 1080 }, zPx: -8640 },
   })
   expect(data.layers[1].placement.zPx).toBe(216)

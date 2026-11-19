@@ -5,7 +5,7 @@ import type { DiagnosticMode } from './projection'
 import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
-import { centeredCover } from './image-fit'
+import { projectedCover } from './image-fit'
 import { configureProjectionCamera } from './projection-camera'
 import { reconcileLayerViews, replaceLayerViews } from './layer-views'
 import { layerRenderSort } from './render-order'
@@ -177,7 +177,7 @@ export class Editor {
       if (!projected) {
         view.surface.uniforms.projectionValid.value = updateProjectedUVs(mesh.geometry, mesh.matrixWorld, this.projectionMatrix)
       }
-      this.updateImageFit(view.surface)
+      this.updateImageFit(view.surface, layer)
       view.surface.uniforms.editorColor.value.set(layer.editorColor)
       ;(outline.material as THREE.LineBasicMaterial).color.set(layer.editorColor)
     }
@@ -202,9 +202,9 @@ export class Editor {
     return Math.min(maxTextureSize(this.previewRenderer), maxTextureSize(this.workRenderer))
   }
 
-  private updateImageFit(surface: LayerView['surface']) {
+  private updateImageFit(surface: LayerView['surface'], layer: Layer) {
     const image = surface.material.map!.image as ImageDimensions
-    const { uv } = centeredCover({ width: image.width, height: image.height }, this.settings)
+    const uv = projectedCover({ width: image.width, height: image.height }, layer.framePx, this.settings)
     surface.uniforms.imageUvScale.value.set(uv.scaleX, uv.scaleY)
     surface.uniforms.imageUvOffset.value.set(uv.offsetX, uv.offsetY)
   }

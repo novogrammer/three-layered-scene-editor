@@ -37,8 +37,9 @@ beforeAll(() => vi.stubGlobal('FileReader', class {
 }))
 afterAll(() => vi.unstubAllGlobals())
 
-async function exportedBuffer(settings = defaultSettings) {
+async function exportedBuffer(settings = defaultSettings, expanded = false) {
   const layers = initialLayers(settings)
+  if (expanded) layers.forEach((layer, i) => { layer.framePx = { width: settings.width * (i === 1 ? 1 : 1.25), height: settings.height * 1.4 } })
   const bytes = await readFile(new URL('../public/samples/ground.png', import.meta.url))
   const sources = new Map(layers.map(layer => [layer.id, { fileName: 'image.png', blob: new Blob([bytes], { type: 'image/png' }), image: { width: 1920, height: 1080 } }]))
   return createSceneGlb(settings, layers, sources)
@@ -52,23 +53,23 @@ function textureLoader() {
   return loader
 }
 
-async function exportedScene(settings = defaultSettings) {
-  return (await textureLoader().parseAsync(await exportedBuffer(settings), '')).scene
+async function exportedScene(settings = defaultSettings, expanded = false) {
+  return (await textureLoader().parseAsync(await exportedBuffer(settings, expanded), '')).scene
 }
 
 function fixture() {
   const scene = new Scene(), camera = new PerspectiveCamera(45, 16 / 9, 0.01, 100)
   camera.position.z = 6
-  scene.userData[key] = { version: 1, role: 'scene', projectionCameraId: 'fixed', composition: { width: 1920, height: 1080 }, rendering: { toneMapping: 'none' }, projection: {
+  scene.userData[key] = { version: 2, role: 'scene', projectionCameraId: 'fixed', composition: { width: 1920, height: 1080 }, rendering: { toneMapping: 'none' }, projection: {
     imageFit: 'cover', imageAlign: 'center', clipDepthRange: 'minus-one-to-one', projectedUvOrigin: 'bottom-left', textureUvOrigin: 'top-left', outsideImage: 'clamp', invalidProjection: 'discard',
   } }
-  camera.userData[key] = { version: 1, role: 'projectionCamera', id: 'fixed' }
+  camera.userData[key] = { version: 2, role: 'projectionCamera', id: 'fixed' }
   scene.add(camera)
   for (const [index, sampling] of [{ mode: 'uv', texCoord: 0 }, { mode: 'camera', cameraId: 'fixed', imageUvScale: [0.5, 1], imageUvOffset: [0.25, 0] }].entries()) {
     const map = new Texture(); map.flipY = false
     const material = new MeshBasicMaterial({ map, transparent: index === 1, opacity: index ? 0.75 : 1 })
     const mesh = new Mesh(new PlaneGeometry(), material)
-    mesh.userData[key] = { version: 1, role: 'layer', layerId: `layer-${index}`, listIndex: index, sampling }
+    mesh.userData[key] = { version: 2, role: 'layer', layerId: `layer-${index}`, listIndex: index, framePx: { width: 1920, height: 1080 }, sampling }
     scene.add(mesh)
   }
   return scene
@@ -82,9 +83,9 @@ test('reusable module depends only on Three.js, without local imports, Loader, D
   expect(source).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver|GLTFLoader)\b|import\.meta/)
 })
 
-test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 },
-  { ...defaultSettings, width: 65536, height: 32768 }])('applies actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
-  const scene = await exportedScene(settings), states = meshStates(scene)
+test.each([[defaultSettings, false], [{ ...defaultSettings, width: 1080, height: 1920, fov: 60 }, false],
+  [{ ...defaultSettings, width: 65536, height: 32768 }, false], [defaultSettings, true]])('applies actual exported GLB using extras alone, preserving UV and texture identity (expanded=%s)', async (settings, expanded) => {
+  const scene = await exportedScene(settings, expanded), states = meshStates(scene)
   const { projection, uniforms } = observeProjection(scene)
   try {
     expect(projection.composition).toEqual({ width: settings.width, height: settings.height })
@@ -134,13 +135,17 @@ test('projection uniforms follow asset transforms independently of display-camer
 })
 
 test.each([
-  ['version', scene => { scene.userData[key].version = 2 }],
+  ['version', scene => { scene.userData[key].version = 1 }],
   ['missing scene metadata', scene => { delete scene.userData[key] }],
   ['invalid composition', scene => { scene.userData[key].composition.width = Infinity }],
   ['unsupported projection', scene => { scene.userData[key].projection.textureUvOrigin = 'bottom-left' }],
   ['tone mapping', scene => { scene.userData[key].rendering.toneMapping = 'aces' }],
   ['camera reference', scene => { scene.userData[key].projectionCameraId = 'missing' }],
   ['camera settings', scene => { scene.children[0].near = -1 }],
+  ['old camera version', scene => { scene.children[0].userData[key].version = 1 }],
+  ['old layer version', scene => { scene.children[1].userData[key].version = 1 }],
+  ['missing frame', scene => { delete scene.children[1].userData[key].framePx }],
+  ['invalid frame', scene => { scene.children[1].userData[key].framePx.height = 0 }],
   ['layer version', scene => { scene.children[1].userData[key].version = 99 }],
   ['missing layer metadata', scene => { delete scene.children[1].userData[key] }],
   ['sampling mode', scene => { scene.children[1].userData[key].sampling.mode = 'other' }],

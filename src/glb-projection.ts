@@ -14,7 +14,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 function metadata(value: unknown, role: string) {
   const data = record(value)
-  if (data.version !== 1 || data.role !== role) fail(`未対応または不正な${role}のextrasです。`)
+  if (data.version !== 2 || data.role !== role) fail(`未対応または不正な${role}のextrasです。`)
   return data
 }
 function identifier(value: unknown): string {
@@ -28,6 +28,8 @@ function pair(value: unknown): [number, number] {
 function readLayer(value: unknown, cameraId: string): LayerInfo {
   const data = metadata(value, 'layer'), sampling = record(data.sampling)
   if (typeof data.listIndex !== 'number' || !Number.isSafeInteger(data.listIndex) || data.listIndex < 0) fail('一覧順が不正です。')
+  const frame = record(data.framePx)
+  if (![frame.width, frame.height].every(n => typeof n === 'number' && Number.isFinite(n) && n > 0)) fail('仮想枠が不正です。')
   const common = { layerId: identifier(data.layerId), listIndex: data.listIndex }
   if (sampling.mode === 'uv' && sampling.texCoord === 0) return { ...common, sampling: { mode: 'uv', texCoord: 0 } }
   if (sampling.mode === 'camera' && sampling.cameraId === cameraId) {

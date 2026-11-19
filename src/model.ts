@@ -40,6 +40,8 @@ export interface LayerData {
   visible: boolean
   alphaMode: AlphaMode
   placement: Placement
+  /** Centered image frame in composition pixels; placement describes the unexpanded plane. */
+  framePx: { width: number; height: number }
 }
 export interface Layer extends LayerData {
   readonly origin: PlacementOrigin
@@ -131,6 +133,32 @@ export function createLayerModel(settings: SceneSettings, data: LayerData): Laye
 
 function layerScale(layer: Layer) { return referenceMetrics(configurations.get(layer)!).scale }
 function cloneLayer(layer: Layer) { return createLayerModel(configurations.get(layer)!, layer) }
+
+/** Ray/axis-aligned-plane intersections after scaling projected X/Y about the camera axis. */
+export function geometryTransform(layer: Layer): Transform {
+  const settings = configurations.get(layer)!, t = { ...layer.transform }, f = layer.framePx
+  if (![f.width, f.height].every(n => Number.isFinite(n) && n > 0)) throw new Error('仮想枠の幅・高さは正の有限値にしてください。')
+  const sx = f.width / settings.width, sy = f.height / settings.height
+  if (sx === 1 && sy === 1) return t
+  const cameraZ = referenceMetrics(settings).cameraZ
+  if (layer.orientation.relation === 'parallel') {
+    return { x: t.x * sx, y: t.y * sy, z: t.z, width: t.width * sx, height: t.height * sy }
+  }
+  const wall = isWall(layer)
+  if ((wall ? t.x : t.y) === 0 || t.z + (wall ? t.width : t.height) / 2 >= cameraZ) {
+    throw new Error('仮想枠を変更できません。基準カメラから面の前方交点を一意に求められません。')
+  }
+  return wall
+    ? { x: t.x, y: t.y * sy / sx, z: cameraZ + (t.z - cameraZ) / sx, width: t.width / sx, height: t.height * sy / sx }
+    : { x: t.x * sx / sy, y: t.y, z: cameraZ + (t.z - cameraZ) / sy, width: t.width * sx / sy, height: t.height / sy }
+}
+
+export function setLayerFrame(layer: Layer, frame: { width: number; height: number }): Layer {
+  const result = cloneLayer(layer)
+  result.framePx = { ...frame }
+  validateScenePlacement(configurations.get(layer)!, [result])
+  return result
+}
 
 export type PlacementUnit = 'px' | 'scene'
 export type SurfaceField = 'center' | 'size' | 'frontZ' | 'backZ'
@@ -293,6 +321,13 @@ export function validateScenePlacement(settings: SceneSettings, layers: readonly
       || Math.fround(t.width) <= 0 || Math.fround(t.height) <= 0) {
       throw new Error('配置を3Dに変換できません。')
     }
+    const expanded = geometryTransform(layer)
+    const extent = Math.hypot(expanded.x, expanded.y, expanded.z) + Math.hypot(expanded.width, expanded.height)
+    if (![...Object.values(expanded), expanded.x - origin.x, expanded.y - origin.y, metrics.cameraZ + extent * 2]
+      .every(n => Number.isFinite(n) && Number.isFinite(Math.fround(n)))
+      || Math.fround(expanded.width) <= 0 || Math.fround(expanded.height) <= 0) {
+      throw new Error('仮想枠を3Dに変換できません。')
+    }
   }
 }
 
@@ -330,7 +365,7 @@ export function frontRect(settings: SceneSettings, transform: Transform): Rect {
 export function initialLayers(settings: SceneSettings): Layer[] {
   const scale = referenceMetrics(settings).scale
   const rect = { x: 0, y: 0, width: settings.width, height: settings.height }
-  const base = { visible: true, originPx: { x: 0, y: 0, z: 0 as const } }
+  const base = { visible: true, originPx: { x: 0, y: 0, z: 0 as const }, framePx: { width: settings.width, height: settings.height } }
   return [
     createLayerModel(settings, { ...base, id: 'layer-1', name: 'レイヤー 1', editorColor: '#78c5b1', alphaMode: 'BLEND',
       orientation: orientationFor('front'), placement: { type: 'screen', rectPx: { ...rect }, zPx: -40 / scale } }),
@@ -349,6 +384,8 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
   const depthScale = Math.tan(previous.fov * Math.PI / 360) / Math.tan(next.fov * Math.PI / 360)
   return layers.map(layer => {
     const data: LayerData = structuredClone(layer)
+    data.framePx.width *= next.width / previous.width
+    data.framePx.height *= next.height / previous.height
     data.originPx.x *= ratio; data.originPx.y *= ratio
     const p = data.placement
     if (p.type === 'surface') {

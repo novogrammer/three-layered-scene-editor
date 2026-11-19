@@ -60,7 +60,9 @@ await renderer.dispose()
 
 GPUの画像寸法上限はレンダラーを持つ側で確認する。再利用モジュールにはレンダラーや固定の寸法上限を持たせない。
 
-## extras v1の仕様
+## extras v2の仕様
+
+書き出しと復元はv2のみ対応する。v1はマテリアルを変更する前に拒否する。旧GLBを使う場合は元のJSONをエディターで読み込み、再出力する。エディターはJSON v1・v2を読み込めるが、保存はv2のみ。
 
 型は`src/glb-projection-extras.ts`に定義する。glTFの`extras.threeLayeredScene`に格納し、Three.jsのGLTFLoaderでは各オブジェクトの`userData.threeLayeredScene`から取得できる。TSLのコードやノード構造、GPU固有の設定は保存しない。
 
@@ -68,7 +70,7 @@ GPUの画像寸法上限はレンダラーを持つ側で確認する。再利�
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "role": "scene",
   "projectionCameraId": "projection-camera",
   "composition": { "width": 1920, "height": 1080 },
@@ -90,7 +92,7 @@ GPUの画像寸法上限はレンダラーを持つ側で確認する。再利�
 ### 投影カメラのノード
 
 ```json
-{ "version": 1, "role": "projectionCamera", "id": "projection-camera" }
+{ "version": 2, "role": "projectionCamera", "id": "projection-camera" }
 ```
 
 同じGLBのシーン内を走査し、シーンの`projectionCameraId`と一致する`id`のPerspectiveCameraを見つける。ノード名やglTF配列のインデックスには依存しない。複数のGLBを読み込む場合は各シーン内で解決する。
@@ -99,40 +101,44 @@ GPUの画像寸法上限はレンダラーを持つ側で確認する。再利�
 
 ### Planeのメッシュノード
 
-共通項目は`version: 1`、`role: "layer"`、安定した`layerId`、元の一覧順を表す`listIndex`。読み込み側ではこの値による独自ソートを行わず、描画順はThree.jsに任せる。非表示レイヤーは出力しないため番号が飛ぶ場合がある。編集用の親Groupではなく、実際のメッシュノードに付与する。画像とOPAQUE／BLEND・片面表示などは標準マテリアルを参照し、重複保存しない。画像はGLTFLoaderで取得した`mesh.material.map`をTSLマテリアルのmapへ渡す。mapの`flipY`はglTFの読み込み時のfalseを維持する。
+共通項目は`version: 2`、画像の仮想枠`framePx: { width, height }`、`role: "layer"`、安定した`layerId`、元の一覧順を表す`listIndex`。読み込み側ではこの値による独自ソートを行わず、描画順はThree.jsに任せる。非表示レイヤーは出力しないため番号が飛ぶ場合がある。編集用の親Groupではなく、実際のメッシュノードに付与する。画像とOPAQUE／BLEND・片面表示などは標準マテリアルを参照し、重複保存しない。画像はGLTFLoaderで取得した`mesh.material.map`をTSLマテリアルのmapへ渡す。mapの`flipY`はglTFの読み込み時のfalseを維持する。
 
 平行な面：
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "role": "layer",
   "layerId": "layer-1",
   "listIndex": 0,
+  "framePx": { "width": 1920, "height": 1080 },
   "sampling": { "mode": "uv", "texCoord": 0 }
 }
 ```
 
+Plane形状は仮想枠の変更を反映した状態で出力する。利用側は形状を再拡張しない。`framePx`は対応する画像領域の情報であり、サンプリングは以下のUVまたは出力済み変換を使う。
+
 `TEXCOORD_0`（Three.jsの`uv`属性）は元画像の左上基準のUV。すでにcoverとV反転を適用しているため、そのUVを使ってmapを参照する。再投影・coverの再適用・Vの再反転はしない。標準のunlitマテリアルを使い続けることもできる。
 
-垂直な面：
+垂直な面（元画像・共通キャンバスとも1920×1080、仮想枠1920×1350の例）：
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "role": "layer",
   "layerId": "ground",
   "listIndex": 2,
+  "framePx": { "width": 1920, "height": 1350 },
   "sampling": {
     "mode": "camera",
     "cameraId": "projection-camera",
-    "imageUvScale": [1, 1],
-    "imageUvOffset": [0, 0]
+    "imageUvScale": [0.8, 0.8],
+    "imageUvOffset": [0.1, 0.1]
   }
 }
 ```
 
-`cameraId`で固定の投影カメラを解決し、次の処理をフラグメントごとに行う。imageUvScale／Offsetは出力時の画像寸法と共通キャンバスから求めた中央coverの変換。利用側で画像寸法から計算し直す必要はない。
+`cameraId`で固定の投影カメラを解決し、次の処理をフラグメントごとに行う。imageUvScale／Offsetは出力時の画像寸法・レイヤーの仮想枠・共通キャンバスから求めた、仮想枠への対応と中央coverを合成した変換。利用側で画像寸法から計算し直す必要はない。
 
 ```text
 projectionFromWorld = projectionMatrix × matrixWorldInverse

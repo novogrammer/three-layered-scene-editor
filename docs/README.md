@@ -7,7 +7,7 @@
 | 起動して画像を配置・保存する | [エディターの操作](./minimal-implementation.md) |
 | GLBを別プロジェクトで表示する | [最小限の使用例](./glb-projection.md#別プロジェクトでの最小限の使用例) |
 | 座標・FOV・保存形式を確認する | [仕様](./specification.md) |
-| GLBの投影用extrasを確認する | [extras v1の仕様](./glb-projection.md#extras-v1の仕様) |
+| GLBの投影用extrasを確認する | [extras v2の仕様](./glb-projection.md#extras-v2の仕様) |
 
 JSONは再編集用、GLBは表示用の成果物。別プロジェクトでの投影表示には`src/glb-projection.ts`の1ファイルを使う。
 

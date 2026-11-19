@@ -12,6 +12,34 @@ async function document() {
 }
 const decode = async () => ({ width: 1920, height: 1080 })
 
+test('v1 loads with composition-sized frames and is saved as v2; v2 requires explicit frames', async () => {
+  const expected = await document(), legacy = structuredClone(expected)
+  legacy.schemaVersion = 1
+  legacy.layers.forEach(layer => { delete layer.framePx })
+  const restored = await prepareSceneImport(JSON.stringify(legacy), decode)
+  expect(restored.layers.every(layer => layer.framePx.width === 1920 && layer.framePx.height === 1080)).toBe(true)
+  expect(await createSceneDocument(restored.settings, restored.layers, restored.assets)).toEqual(expected)
+  const malformed = structuredClone(expected)
+  delete malformed.layers[0].framePx
+  await expect(prepareSceneImport(JSON.stringify(malformed), decode)).rejects.toThrow()
+})
+
+test('v2 preserves each centered frame and rejects invalid frame changes before decoding images', async () => {
+  const doc = await document()
+  doc.layers[0].framePx = { width: 2400.123456789, height: 1350.987654321 }
+  doc.layers[2].framePx = { width: 1920, height: 1350 }
+  const restored = await prepareSceneImport(JSON.stringify(doc), decode)
+  expect(await createSceneDocument(restored.settings, restored.layers, restored.assets)).toEqual(doc)
+  const before = structuredClone(restored.layers)
+  for (const frame of [null, { width: 0, height: 1080 }, { width: 1920, height: -1 }]) {
+    const invalid = structuredClone(doc); invalid.layers[0].framePx = frame
+    const reader = vi.fn(decode)
+    await expect(prepareSceneImport(JSON.stringify(invalid), reader)).rejects.toThrow()
+    expect(reader).not.toHaveBeenCalled()
+  }
+  expect(structuredClone(restored.layers)).toEqual(before)
+})
+
 test.each([
   ['small reference height', { referenceHeight: 0.01 }, () => {}],
   ['large reference height', { referenceHeight: 1000 }, () => {}],
@@ -117,7 +145,7 @@ test('empty scenes and shared image references are valid', async () => {
 })
 
 test.each([
-  ['version', d => { d.schemaVersion = 2 }],
+  ['version', d => { d.schemaVersion = 3 }],
   ['missing field', d => { delete d.referencePlane }],
   ['invalid size', d => { d.composition.width = 0 }],
   ['fractional resolution', d => { d.composition.width = 1.5 }],

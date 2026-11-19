@@ -1,16 +1,17 @@
 import type { LayerData, SceneSettings } from './model'
-import type { ImageAssetV1, SceneDocumentV1, SceneLayerV1 } from './scene-document'
+import type { ImageAssetV1, SceneDocumentV2, SceneLayerV2 } from './scene-document'
 
 export interface ImageSource {
   fileName: string
   blob: Blob
 }
 
-function savedLayer(layer: LayerData): SceneLayerV1 {
+function savedLayer(layer: LayerData): SceneLayerV2 {
   const common = {
     id: layer.id, name: layer.name, imageId: `image-${layer.id}`,
     visible: layer.visible, editorColor: layer.editorColor, alphaMode: layer.alphaMode,
     originPx: { ...layer.originPx },
+    framePx: { ...layer.framePx },
   }
   const p = layer.placement
   if (p.type === 'screen') {
@@ -43,7 +44,7 @@ async function encodeImage(blob: Blob): Promise<Pick<ImageAssetV1, 'mimeType' | 
 }
 
 /** Capture the committed scene and source files before any asynchronous image encoding. */
-export async function createSceneDocument(settings: SceneSettings, layers: readonly LayerData[], sources: ReadonlyMap<string, ImageSource>): Promise<SceneDocumentV1> {
+export async function createSceneDocument(settings: SceneSettings, layers: readonly LayerData[], sources: ReadonlyMap<string, ImageSource>): Promise<SceneDocumentV2> {
   const config = { ...settings }
   const snapshot = structuredClone(layers)
   const images = snapshot.map(layer => {
@@ -55,7 +56,7 @@ export async function createSceneDocument(settings: SceneSettings, layers: reado
     id: image.id, name: image.name, ...await encodeImage(image.blob),
   })))
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     composition: { width: config.width, height: config.height },
     referencePlane: { height: config.referenceHeight },
     projectionCamera: { fov: config.fov },

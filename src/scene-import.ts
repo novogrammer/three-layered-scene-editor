@@ -1,6 +1,6 @@
 import { createLayerModel, referenceMetrics, validateScenePlacement } from './model'
 import type { LayerData, SceneSettings } from './model'
-import type { ImageAssetV1, SceneDocumentV1, SceneLayerV1 } from './scene-document'
+import type { ImageAssetV1, SceneDocumentV2, SceneLayerV1, SceneLayerV2 } from './scene-document'
 
 function invalid(message: string): never { throw new Error(`JSONを読み込めません。${message}`) }
 function object(value: unknown): Record<string, unknown> {
@@ -62,21 +62,25 @@ function asset(value: unknown): ImageAssetV1 {
   return { id: id(v.id), name: string(v.name), mimeType: v.mimeType, data: string(v.data) }
 }
 
-export function parseSceneDocument(text: string): SceneDocumentV1 {
+/** Normalize legacy v1 into v2 before restoring any runtime objects. */
+export function parseSceneDocument(text: string): SceneDocumentV2 {
   let value: unknown
   try { value = JSON.parse(text) } catch { return invalid('JSONの構文が不正です。') }
   const v = object(value)
-  if (v.schemaVersion !== 1) invalid('対応していない保存形式のバージョンです。')
+  if (v.schemaVersion !== 1 && v.schemaVersion !== 2) invalid('対応していない保存形式のバージョンです。')
   const c = object(v.composition), r = object(v.referencePlane), camera = object(v.projectionCamera), projection = object(v.projection)
   const width = number(c.width), height = number(c.height), referenceHeight = number(r.height), fov = number(camera.fov)
   try { referenceMetrics({ width, height, referenceHeight, fov }) }
   catch (error) { invalid(error instanceof Error ? error.message : '基準設定が不正です。') }
   if (projection.imageFit !== 'cover' || projection.imageAlign !== 'center' || projection.outsideImage !== 'clamp') invalid('投影設定が未対応です。')
-  const layers = array(v.layers).map(layer), assets = array(v.assets).map(asset)
+  const layers = array(v.layers).map(value => {
+    const frame = v.schemaVersion === 1 ? { width, height } : object(object(value).framePx)
+    return { ...layer(value), framePx: { width: number(frame.width, true), height: number(frame.height, true) } }
+  }), assets = array(v.assets).map(asset)
   unique(layers.map(l => l.id)); unique(assets.map(a => a.id))
   const assetIds = new Set(assets.map(a => a.id))
   if (layers.some(l => !assetIds.has(l.imageId))) invalid('参照する画像がありません。')
-  return { schemaVersion: 1, composition: { width, height }, referencePlane: { height: referenceHeight },
+  return { schemaVersion: 2, composition: { width, height }, referencePlane: { height: referenceHeight },
     projectionCamera: { fov }, projection: { imageFit: 'cover', imageAlign: 'center', outsideImage: 'clamp' }, layers, assets }
 }
 
@@ -93,13 +97,13 @@ function imageBlob(asset: ImageAssetV1): Blob {
   return new Blob([bytes], { type: asset.mimeType })
 }
 
-function editableLayer(value: SceneLayerV1): LayerData {
+function editableLayer(value: SceneLayerV2): LayerData {
   const p = value.placement
   const placement: LayerData['placement'] = p.type === 'screen' ? { ...p, rectPx: { ...p.rectPx } }
     : 'centerXPx' in p ? { type: 'surface', centerPx: p.centerXPx, sizePx: p.widthPx, frontZPx: p.frontZPx, backZPx: p.backZPx }
     : { type: 'surface', centerPx: p.centerYPx, sizePx: p.heightPx, frontZPx: p.frontZPx, backZPx: p.backZPx }
   return { id: value.id, name: value.name, orientation: { ...value.orientation }, originPx: { ...value.originPx },
-    editorColor: value.editorColor, visible: value.visible, alphaMode: value.alphaMode, placement }
+    editorColor: value.editorColor, visible: value.visible, alphaMode: value.alphaMode, placement, framePx: { ...value.framePx } }
 }
 
 /** Prepare everything without touching the active editor. The caller installs only a complete result. */

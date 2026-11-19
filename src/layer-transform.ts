@@ -1,10 +1,10 @@
 import type { Object3D } from 'three/webgpu'
-import { orientationRotation } from './model'
+import { geometryTransform, orientationRotation } from './model'
 import type { Layer } from './model'
 
 /** Separate the z=0 placement origin from the geometry center and dimensions. */
 export function applyLayerTransform(root: Object3D, plane: Object3D, layer: Layer) {
-  const { origin, transform: t } = layer
+  const { origin } = layer, t = geometryTransform(layer)
   root.position.set(origin.x, origin.y, 0)
   root.rotation.set(...orientationRotation(layer.orientation.direction))
   root.visible = layer.visible

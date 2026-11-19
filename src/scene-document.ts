@@ -63,3 +63,9 @@ export interface SceneDocumentV1 {
   /** Written last to keep the editable structure above embedded image data. */
   assets: ImageAssetV1[]
 }
+
+export type SceneLayerV2 = SceneLayerV1 & { framePx: { width: number; height: number } }
+export type SceneDocumentV2 = Omit<SceneDocumentV1, 'schemaVersion' | 'layers'> & {
+  schemaVersion: 2
+  layers: SceneLayerV2[]
+}

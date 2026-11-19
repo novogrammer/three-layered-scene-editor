@@ -2,8 +2,8 @@
 export const GLB_PROJECTION_EXTRAS_KEY = 'threeLayeredScene'
 export const GLB_PROJECTION_CAMERA_ID = 'projection-camera'
 
-export interface GlbSceneProjectionV1 {
-  version: 1
+export interface GlbSceneProjectionV2 {
+  version: 2
   role: 'scene'
   /** Resolve only within this GLB's scene; do not use node names as identifiers. */
   projectionCameraId: string
@@ -20,21 +20,22 @@ export interface GlbSceneProjectionV1 {
   }
 }
 
-export interface GlbProjectionCameraV1 {
-  version: 1
+export interface GlbProjectionCameraV2 {
+  version: 2
   role: 'projectionCamera'
   id: string
 }
 
-interface LayerProjectionBaseV1 {
-  version: 1
+interface LayerProjectionBaseV2 {
+  version: 2
   role: 'layer'
   layerId: string
+  framePx: { width: number; height: number }
   /** Original editor list index, usable as an equal-depth drawing tie-breaker. */
   listIndex: number
 }
 
-export type GlbLayerProjectionV1 = LayerProjectionBaseV1 & {
+export type GlbLayerProjectionV2 = LayerProjectionBaseV2 & {
   sampling:
     | {
       /** TEXCOORD_0 is already an image UV: cover and V inversion are baked in. */
