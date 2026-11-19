@@ -10,7 +10,7 @@
     <div id="app">
       <header class="app-header">
         <div><span class="brand-mark">▱</span><strong>Layered Scene</strong></div>
-        <div><button id="load-json" type="button">JSON読み込み</button><button id="save-json" type="button">JSON保存</button><button id="export-glb" type="button">GLB書き出し</button></div>
+        <div><a href="https://github.com/novogrammer/three-layered-scene-editor" target="_blank" rel="noopener noreferrer">GitHub</a><a href="./viewer.html">ビューアー</a><button id="load-json" type="button">JSON読み込み</button><button id="save-json" type="button">JSON保存</button><button id="export-glb" type="button">GLB書き出し</button></div>
         <input id="load-json-file" type="file" accept=".json,application/json" aria-label="読み込むJSON" hidden>
       </header>
       <div class="workspace">
@@ -29,7 +29,7 @@
                 <label>垂直FOV <span>°</span><input name="fov" type="number" min="5" max="140" step="any" required></label>
               </div>
               <label title="基準面に平行なレイヤーの、設定変更時の配置方法">設定変更時の配置
-                <select id="fov-policy"><option value="screen">2D配置を保持</option><option value="world">3D配置を保持</option></select>
+                <select id="fov-policy"></select>
               </label>
               <button class="primary full" type="submit">適用</button>
             </form>
@@ -73,13 +73,13 @@
           </div>
           <section class="parallax-controls">
             <strong>視差確認</strong>
-            <label>左右 <input id="offset-x" type="range" min="-1" max="1" step="0.01" value="0"><output id="offset-x-value">0.00</output></label>
-            <label>上下 <input id="offset-y" type="range" min="-1" max="1" step="0.01" value="0"><output id="offset-y-value">0.00</output></label>
+            <label>左右 <input id="offset-x" type="range" min="-1" max="1" step="0.01"><output id="offset-x-value"></output></label>
+            <label>上下 <input id="offset-y" type="range" min="-1" max="1" step="0.01"><output id="offset-y-value"></output></label>
             <button id="reset-preview" type="button">基準へ戻す</button>
           </section>
           <section class="view-card work-card">
             <div class="view-heading work-heading"><h2>配置確認</h2>
-              <div class="work-actions"><select id="diagnostic" aria-label="配置確認の表示"><option value="bounds">範囲</option><option value="image">画像</option><option value="color">識別色</option></select>
+              <div class="work-actions"><select id="diagnostic" aria-label="配置確認の表示"></select>
               <button type="button" data-view="orbit">斜め</button><button type="button" data-view="side">横</button><button type="button" data-view="top">上</button></div>
             </div>
             <div class="work-stage"><canvas id="work" aria-label="別角度からの3D配置確認"></canvas></div>

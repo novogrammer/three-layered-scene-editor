@@ -24,6 +24,7 @@ let loading = false
 let exportingGlb = false
 let sceneRevision = 0
 let depthPolicy: PlacementPolicy = 'screen'
+let settingsPolicy: PlacementPolicy = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
 interface LayerAsset extends ImageSource { image: HTMLImageElement; texture: THREE.Texture }
@@ -116,6 +117,17 @@ function refreshSelection() {
   editor.selectedId = selectedId
   renderLayerUI()
   editor.requestRender()
+}
+
+function renderPreviewControls() {
+  for (const axis of ['x', 'y'] as const) {
+    const value = axis === 'x' ? editor.offsetX : editor.offsetY
+    get<HTMLInputElement>(`offset-${axis}`).value = String(value)
+    get(`offset-${axis}-value`).textContent = value.toFixed(2)
+  }
+  get('preview-label').hidden = !(editor.offsetX || editor.offsetY)
+  get<HTMLInputElement>('surrounding').checked = editor.surrounding
+  get('reference-frame').hidden = !editor.surrounding
 }
 
 function renderList() {
@@ -545,7 +557,6 @@ async function start() {
     status('初期化中…')
     await editor.init()
     if (!alive) return
-    inputs.forEach((element) => { element.disabled = false })
     maxTextureSize = editor.maxTextureSize
     get('save-json').onclick = () => { void saveJson() }
     get('export-glb').onclick = () => { void exportGlb() }
@@ -558,14 +569,19 @@ async function start() {
     const form = get<HTMLFormElement>('settings-form')
     const keys = ['width', 'height', 'referenceHeight', 'fov'] as const
     for (const key of keys) (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key])
+    const policySelect = get<HTMLSelectElement>('fov-policy')
+    for (const [value, label] of [['screen', '2D配置を保持'], ['world', '3D配置を保持']]) {
+      policySelect.add(new Option(label, value))
+    }
+    policySelect.value = settingsPolicy
+    policySelect.onchange = () => { settingsPolicy = policySelect.value as PlacementPolicy }
     form.onsubmit = (event) => {
       event.preventDefault()
       if (!form.reportValidity()) return
       const next = Object.fromEntries(keys.map((key) => [key, Number((form.elements.namedItem(key) as HTMLInputElement).value)])) as unknown as SceneSettings
       try {
         referenceMetrics(next)
-        const policy = get<HTMLSelectElement>('fov-policy').value as PlacementPolicy
-        const updated = reconfigureScene(settings, next, layers, policy)
+        const updated = reconfigureScene(settings, next, layers, settingsPolicy)
         settings = next; layers = updated
         refreshScene()
         status('設定を適用しました。')
@@ -577,28 +593,28 @@ async function start() {
         const value = input.valueAsNumber
         if (axis === 'x') editor.offsetX = value
         else editor.offsetY = value
-        get(`offset-${axis}-value`).textContent = value.toFixed(2)
-        get('preview-label').hidden = !(editor.offsetX || editor.offsetY)
+        renderPreviewControls()
         editor.requestRender()
       }
     }
     offset('x'); offset('y')
     get('reset-preview').onclick = () => {
-      for (const axis of ['x', 'y']) {
-        get<HTMLInputElement>(`offset-${axis}`).value = '0'
-        get(`offset-${axis}-value`).textContent = '0.00'
-      }
       editor.offsetX = editor.offsetY = 0
-      get('preview-label').hidden = true
+      renderPreviewControls()
       editor.requestRender()
     }
     get<HTMLInputElement>('surrounding').onchange = (event) => {
       editor.surrounding = (event.target as HTMLInputElement).checked
-      get('reference-frame').hidden = !editor.surrounding
+      renderPreviewControls()
       editor.requestRender()
     }
-    get<HTMLSelectElement>('diagnostic').onchange = (event) => {
-      editor.diagnostic = (event.target as HTMLSelectElement).value as DiagnosticMode
+    const diagnosticSelect = get<HTMLSelectElement>('diagnostic')
+    for (const [value, label] of [['bounds', '範囲'], ['image', '画像'], ['color', '識別色']]) {
+      diagnosticSelect.add(new Option(label, value))
+    }
+    diagnosticSelect.value = editor.diagnostic
+    diagnosticSelect.onchange = () => {
+      editor.diagnostic = diagnosticSelect.value as DiagnosticMode
       editor.requestRender()
     }
     document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
@@ -606,7 +622,9 @@ async function start() {
     })
     stageObserver = new ResizeObserver(fitStages)
     document.querySelectorAll('.image-area').forEach((element) => stageObserver!.observe(element))
+    renderPreviewControls()
     refreshScene()
+    inputs.forEach((element) => { element.disabled = false })
     status('')
   } catch (error) {
     if (!alive) return

@@ -11,6 +11,8 @@ button.primary:hover { background: #a6ddcc; }
 .full { width: 100%; }
 .app-header { height: 61px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; background: #151f27; border-bottom: 1px solid #2c3943; }
 .app-header > div { display: flex; align-items: center; gap: 13px; }
+.app-header a { color: #91d8c4; text-underline-offset: 3px; }
+.app-header a:focus-visible { outline: 2px solid #91d8c4; outline-offset: 3px; }
 .brand-mark { font-size: 32px; color: #9ed9c6; }
 .app-header strong { font-size: 17px; letter-spacing: -.4px; }
 .workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); align-items: start; }
