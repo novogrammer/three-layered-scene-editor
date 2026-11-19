@@ -9,6 +9,7 @@ import { centeredCover } from './image-fit'
 import { configureProjectionCamera } from './projection-camera'
 import { reconcileLayerViews, replaceLayerViews } from './layer-views'
 import { layerRenderSort } from './render-order'
+import { assertImageFitsGpu, maxTextureSize } from './gpu-texture'
 import type { ImageDimensions } from './image-fit'
 import type { Layer, SceneSettings } from './model'
 
@@ -191,23 +192,14 @@ export class Editor {
       throw failure.reason
     }
     if (!this.disposed) {
+      for (const texture of this.textures.values()) assertImageFitsGpu(texture.image as ImageDimensions, this.maxTextureSize)
       this.initialized = true
       this.requestRender()
     }
   }
 
   get maxTextureSize() {
-    const limit = (renderer: THREE.WebGPURenderer) => {
-      // The backends expose different native limits; access only after init().
-      const backend = renderer.backend as typeof renderer.backend & {
-        device?: { limits: { maxTextureDimension2D: number } }
-        gl?: WebGL2RenderingContext
-      }
-      if (backend.device) return backend.device.limits.maxTextureDimension2D
-      if (backend.gl) return Number(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE))
-      throw new Error('レンダラーのテクスチャ上限を取得できませんでした。')
-    }
-    return Math.min(limit(this.previewRenderer), limit(this.workRenderer))
+    return Math.min(maxTextureSize(this.previewRenderer), maxTextureSize(this.workRenderer))
   }
 
   private updateImageFit(surface: LayerView['surface']) {

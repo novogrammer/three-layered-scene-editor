@@ -3,12 +3,13 @@ import * as THREE from 'three/webgpu'
 import { Editor } from './editor'
 import { loadDemoImages } from './demo'
 import { createSceneDocument } from './scene-json'
-import { MAX_SCENE_JSON_BYTES, prepareSceneImport } from './scene-import'
+import { prepareSceneImport } from './scene-import'
 import { createSceneGlb } from './scene-glb'
 import type { ImageSource } from './scene-json'
 import { imageAspectNotice } from './image-aspect'
+import { assertImageFitsGpu } from './gpu-texture'
 import { centeredCover } from './image-fit'
-import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
+import { compositionLayers, createLayer, moveLayer, removeLayer } from './layer-collection'
 import { changeOrientation, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
 import type { DiagnosticMode } from './projection'
 import type { Layer, PlacementPolicy, PlacementUnit, PlaneDirection, SceneSettings } from './model'
@@ -243,7 +244,7 @@ function renderPanel() {
     directionLabel.append(direction); panel.append(directionLabel)
   }
   const fileLabel = document.createElement('label'); fileLabel.textContent = '画像'
-  const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'; input.title = 'PNG / JPEG / WebP、32MB以下'
+  const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'; input.title = 'PNG / JPEG / WebP'
   fileLabel.append(input); panel.append(fileLabel)
   const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = `${asset.fileName} / ${asset.image.width} × ${asset.image.height}`
   panel.append(fileInfo)
@@ -361,27 +362,24 @@ function renderPanel() {
 
 function updateAddButton() {
   const button = get<HTMLButtonElement>('add-layer')
-  button.disabled = adding || layers.length >= MAX_LAYERS
-  button.title = layers.length >= MAX_LAYERS ? `最大${MAX_LAYERS}枚です` : '画像からレイヤーを追加'
+  button.disabled = adding
+  button.title = '画像からレイヤーを追加'
 }
 
 async function decodeImage(file: Blob) {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('PNG・JPEG・WebPの画像を選んでください。')
-  if (file.size > 32 * 1024 * 1024) throw new Error('画像は32MB以下にしてください。')
   const url = URL.createObjectURL(file)
   try {
     const image = new Image()
     image.src = url
     await image.decode()
-    const maxSize = Math.min(8192, maxTextureSize)
-    if (image.width > maxSize || image.height > maxSize) throw new Error(`画像の各辺は${maxSize}px以下にしてください。`)
+    assertImageFitsGpu(image, editor.maxTextureSize)
     return image
   } finally { URL.revokeObjectURL(url) }
 }
 
 async function addImageLayer(file: File) {
   if (adding) return
-  if (layers.length >= MAX_LAYERS) { status(`レイヤーは${MAX_LAYERS}枚まで追加できます。`, true); return }
   adding = true
   const revision = sceneRevision
   updateAddButton()
@@ -441,7 +439,6 @@ async function loadJson(file: File) {
   let installed = false
   status('JSONを読み込み中…')
   try {
-    if (file.size > MAX_SCENE_JSON_BYTES) throw new Error('JSONは400MB以下にしてください。')
     const prepared = await prepareSceneImport(await file.text(), decodeImage)
     if (!alive) return
     for (const [id, asset] of prepared.assets) {
@@ -529,7 +526,6 @@ async function exportGlb() {
   }
 }
 
-let maxTextureSize = 8192
 let stageObserver: ResizeObserver | undefined
 
 // Register before awaiting GPU initialization so HMR cannot leave an old editor alive.
@@ -557,7 +553,6 @@ async function start() {
     status('初期化中…')
     await editor.init()
     if (!alive) return
-    maxTextureSize = editor.maxTextureSize
     get('save-json').onclick = () => { void saveJson() }
     get('export-glb').onclick = () => { void exportGlb() }
     const loadInput = get<HTMLInputElement>('load-json-file')

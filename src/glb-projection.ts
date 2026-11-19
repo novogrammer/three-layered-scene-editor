@@ -86,7 +86,7 @@ export interface CameraProjection {
 export function applyCameraProjection(scene: THREE.Object3D): CameraProjection {
   const data = metadata(scene.userData[EXTRAS], 'scene'), composition = record(data.composition)
   const projection = record(data.projection), rendering = record(data.rendering)
-  if (![composition.width, composition.height].every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 1 && n <= 16384)) fail('共通キャンバスの寸法が不正です。')
+  if (![composition.width, composition.height].every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 1)) fail('共通キャンバスの寸法が不正です。')
   const conventions = { imageFit: 'cover', imageAlign: 'center', clipDepthRange: 'minus-one-to-one',
     projectedUvOrigin: 'bottom-left', textureUvOrigin: 'top-left', outsideImage: 'clamp', invalidProjection: 'discard' }
   if (Object.entries(conventions).some(([key, value]) => projection[key] !== value) || rendering.toneMapping !== 'none') fail('未対応の投影設定です。')

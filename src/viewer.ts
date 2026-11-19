@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { applyCameraProjection } from './glb-projection'
 import type { CameraProjection } from './glb-projection'
+import { assertImageFitsGpu, maxTextureSize } from './gpu-texture'
 
 function disposeScene(scene: THREE.Object3D) {
   const materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>(), geometries = new Set<THREE.BufferGeometry>()
@@ -90,7 +91,6 @@ async function startViewer(canvas: HTMLCanvasElement) {
     let candidateScene: THREE.Object3D | undefined, candidate: CameraProjection | undefined
     open.disabled = true; status('GLBを読み込み中…')
     try {
-      if (file.size > 400 * 1024 * 1024) throw new Error('GLBは400MB以下にしてください。')
       const bytes = await file.arrayBuffer()
       if (bytes.byteLength < 12 || new DataView(bytes).getUint32(0, true) !== 0x46546c67) throw new Error('GLBファイルを選択してください。')
       const manager = new THREE.LoadingManager()
@@ -100,6 +100,16 @@ async function startViewer(canvas: HTMLCanvasElement) {
       })
       candidateScene = (await new GLTFLoader(manager).parseAsync(bytes, '')).scene
       if (disposed || token !== revision) return
+      const limit = maxTextureSize(renderer)
+      candidateScene.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        for (const material of materials) {
+          for (const value of Object.values(material)) {
+            if (value instanceof THREE.Texture) assertImageFitsGpu(value.image, limit)
+          }
+        }
+      })
       candidate = applyCameraProjection(candidateScene)
       const previous = current
       scene.add(candidate.scene); current = candidate; candidate = undefined; candidateScene = undefined

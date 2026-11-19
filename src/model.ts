@@ -255,6 +255,9 @@ export function orientationRotation(direction: PlaneDirection): [number, number,
 
 export function referenceMetrics(settings: SceneSettings) {
   const { width, height, referenceHeight, fov } = settings
+  if (![width, height].every(n => Number.isSafeInteger(n) && n > 0)) {
+    throw new Error('解像度は正の安全な整数で指定してください。')
+  }
   if (![width, height, referenceHeight, fov].every(Number.isFinite)
     || width <= 0 || height <= 0 || referenceHeight <= 0 || fov <= 0 || fov >= 180) {
     throw new Error('解像度・基準高さは正の値、FOVは0°より大きく180°未満で指定してください。')

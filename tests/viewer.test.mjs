@@ -82,7 +82,8 @@ test('reusable module depends only on Three.js, without local imports, Loader, D
   expect(source).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver|GLTFLoader)\b|import\.meta/)
 })
 
-test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('applies actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
+test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 },
+  { ...defaultSettings, width: 65536, height: 32768 }])('applies actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
   const scene = await exportedScene(settings), states = meshStates(scene)
   const { projection, uniforms } = observeProjection(scene)
   try {

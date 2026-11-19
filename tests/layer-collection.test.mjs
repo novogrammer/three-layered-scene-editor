@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { PerspectiveCamera, Vector3 } from 'three/webgpu'
-import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from '../src/layer-collection.ts'
+import { compositionLayers, createLayer, moveLayer, removeLayer } from '../src/layer-collection.ts'
 import { defaultSettings, initialLayers, referenceMetrics } from '../src/model.ts'
 
 test('new image layers start at the reference frame and preserve the existing collection', () => {
@@ -21,12 +21,13 @@ test('new image layers start at the reference frame and preserve the existing co
   expect(layers).toEqual(before)
 })
 
-test('layer limit and duplicate IDs are rejected without changing the collection', () => {
+test('layers can exceed the expected use-case count while duplicate IDs are still rejected', () => {
   const layers = initialLayers(defaultSettings)
-  expect(() => createLayer(defaultSettings, layers, layers[0].id, 'duplicate')).toThrow()
-  while (layers.length < MAX_LAYERS) layers.push(createLayer(defaultSettings, layers, `new-${layers.length}`, '画像'))
+  while (layers.length < 20) layers.push(createLayer(defaultSettings, layers, `new-${layers.length}`, '画像'))
+  expect(layers).toHaveLength(20)
+  expect(layers.every(layer => /^#[0-9a-f]{6}$/i.test(layer.editorColor))).toBe(true)
   const before = structuredClone(layers)
-  expect(() => createLayer(defaultSettings, layers, 'overflow', '画像')).toThrow()
+  expect(() => createLayer(defaultSettings, layers, layers[0].id, 'duplicate')).toThrow()
   expect(layers).toEqual(before)
 })
 

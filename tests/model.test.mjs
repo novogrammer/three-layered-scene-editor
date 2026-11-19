@@ -2,6 +2,13 @@ import { expect, test } from 'vitest'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { defaultSettings, referenceMetrics, placeFront, frontRect, initialLayers, reconfigureScene } from '../src/model.ts'
 
+test('composition resolution has no fixed pixel cap and must remain a positive safe integer', () => {
+  expect(referenceMetrics({ ...defaultSettings, width: 65536, height: 32768 }).aspect).toBe(2)
+  for (const width of [0, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => referenceMetrics({ ...defaultSettings, width })).toThrow('整数')
+  }
+})
+
 const close = (actual, expected, epsilon = 1e-9) => expect(Math.abs(actual - expected), `${actual} != ${expected}`).toBeLessThan(epsilon)
 function projectedBounds(settings, transform) {
   const metrics = referenceMetrics(settings)

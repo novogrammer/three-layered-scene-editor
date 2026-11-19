@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { createSceneDocument } from '../src/scene-json.ts'
 import { parseSceneDocument, prepareSceneImport } from '../src/scene-import.ts'
 import { changeOrientation, createLayerModel, defaultSettings, initialLayers, orientationFor, setFrontRect } from '../src/model.ts'
+import { assertImageFitsGpu } from '../src/gpu-texture.ts'
 
 const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 255])
 async function document() {
@@ -65,7 +66,8 @@ test.each([
   ['duplicate layers', d => { d.layers[1].id = d.layers[0].id }],
   ['duplicate assets', d => { d.assets[1].id = d.assets[0].id }],
   ['missing reference', d => { d.layers[0].imageId = 'missing' }],
-  ['too many layers', d => { d.layers = Array(10).fill(d.layers[0]) }],
+  ['invalid layers array', d => { d.layers = {} }],
+  ['invalid assets array', d => { d.assets = null }],
   ['direction', d => { d.layers[0].orientation.direction = 'left' }],
   ['origin Z', d => { d.layers[0].originPx.z = 1 }],
   ['non-number', d => { d.layers[0].originPx.x = '0' }],
@@ -109,6 +111,42 @@ test('a late image decoding failure leaves edited data intact and does not retur
   expect(structuredClone(current)).toEqual(before)
 })
 
-test.each([{ width: 8193, height: 1 }, { width: 0, height: 1 }, { width: NaN, height: 1 }])('invalid decoded dimensions are rejected', async size => {
+test.each([{ width: 0, height: 1 }, { width: NaN, height: 1 }, { width: 1.5, height: 1 }])('invalid decoded dimensions are rejected', async size => {
   await expect(prepareSceneImport(JSON.stringify(await document()), async () => size)).rejects.toThrow('寸法')
+})
+
+test('more than nine layers and images and a large composition round-trip without fixed limits', async () => {
+  const doc = await document(), layer = doc.layers[0], asset = doc.assets[0]
+  doc.composition = { width: 65536, height: 32768 }
+  doc.layers = Array.from({ length: 20 }, (_, i) => ({ ...structuredClone(layer), id: `layer-${i}`, imageId: `image-layer-${i}` }))
+  doc.assets = Array.from({ length: 20 }, (_, i) => ({ ...asset, id: `image-layer-${i}` }))
+  const restored = await prepareSceneImport(JSON.stringify(doc), async () => ({ width: 16384, height: 9000 }))
+  expect(restored.layers).toHaveLength(20)
+  expect(restored.assets.size).toBe(20)
+  expect(await createSceneDocument(restored.settings, restored.layers, restored.assets)).toEqual(doc)
+})
+
+test('embedded images larger than 32 MiB retain their bytes', async () => {
+  const layers = initialLayers(defaultSettings).slice(0, 1)
+  const data = new Uint8Array(32 * 1024 * 1024 + 1)
+  data[0] = 137; data[data.length - 1] = 255
+  const sources = new Map([[layers[0].id, { fileName: 'large.png', blob: new Blob([data], { type: 'image/png' }) }]])
+  const doc = await createSceneDocument(defaultSettings, layers, sources)
+  const restored = await prepareSceneImport(JSON.stringify(doc), decode)
+  const blob = restored.assets.get(layers[0].id).blob
+  expect(blob.size).toBe(data.length)
+  expect(Buffer.from(await blob.arrayBuffer()).equals(Buffer.from(data))).toBe(true)
+})
+
+test('GPU image limits are enforced by the decoder before replacing the edited scene', async () => {
+  const current = initialLayers(defaultSettings), before = structuredClone(current)
+  const text = JSON.stringify(await document())
+  const reader = vi.fn(async () => {
+    const image = { width: 8193, height: 1080 }
+    assertImageFitsGpu(image, 8192)
+    return image
+  })
+  await expect(prepareSceneImport(text, reader)).rejects.toThrow('GPU')
+  expect(reader).toHaveBeenCalledTimes(1)
+  expect(structuredClone(current)).toEqual(before)
 })
