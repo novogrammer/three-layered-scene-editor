@@ -2,11 +2,15 @@ import { Color, MeshBasicNodeMaterial, Vector2 } from 'three/webgpu'
 import type { Matrix4, Node, Texture } from 'three/webgpu'
 import { Fn, If, clamp, context, float, fract, materialReference, max, mix, positionWorld, screenCoordinate, step, uniform, uv, vec3, vec4 } from 'three/tsl'
 
+// Numeric codes are only used at the TSL uniform boundary.
+export const diagnosticModes = { image: 0, bounds: 1, color: 2 } as const
+export type DiagnosticMode = keyof typeof diagnosticModes
+
 /** Backend-independent projection; the reference matrix uses WebGL's -1..1 clip Z. */
 export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, projected: boolean) {
   const uniforms = {
     projectionFromWorld: uniform(matrix),
-    diagnosticMode: uniform(0, 'int'),
+    diagnosticMode: uniform(diagnosticModes.image, 'int'),
     projectionValid: uniform(true),
     editorColor: uniform(new Color(color)),
     imageUvScale: uniform(new Vector2(1, 1)),
@@ -32,12 +36,12 @@ export function surfaceMaterial(image: Texture, matrix: Matrix4, color: string, 
     const sample = context(mapNode, { getUV: () => clamp(imageUV, 0, 1) }).toVar()
     const result = vec4(sample).toVar()
 
-    If(uniforms.diagnosticMode.equal(2), () => {
+    If(uniforms.diagnosticMode.equal(diagnosticModes.color), () => {
       result.assign(vec4(uniforms.editorColor, 0.65))
     }).ElseIf(valid.not(), () => {
-      uniforms.diagnosticMode.equal(0).discard()
+      uniforms.diagnosticMode.equal(diagnosticModes.image).discard()
       result.assign(vec4(0.8, 0.12, 0.24, 0.85))
-    }).ElseIf(uniforms.diagnosticMode.equal(1), () => {
+    }).ElseIf(uniforms.diagnosticMode.equal(diagnosticModes.bounds), () => {
       If(inside.not(), () => {
         const hatch = step(0.5, fract(screenCoordinate.x.add(screenCoordinate.y).div(12)))
         result.assign(vec4(mix(vec3(0.32, 0.08, 0.14), vec3(1, 0.34, 0.18), hatch), 0.85))

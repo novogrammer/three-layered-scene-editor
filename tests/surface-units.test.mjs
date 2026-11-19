@@ -34,7 +34,7 @@ test.each(['down', 'up', 'left', 'right'])('%s accepts exact pixel input and equ
 
 test('unit input uses the current scale after reference settings change', () => {
   const next = { ...defaultSettings, referenceHeight: 7, height: 1920, width: 1080, fov: 60 }
-  const [layer] = reconfigureScene(defaultSettings, next, [surface('right')], true)
+  const [layer] = reconfigureScene(defaultSettings, next, [surface('right')], 'screen')
   const changed = moveOriginPx(layer, 540, layer.originPx.y)
   expect(changed.origin.x).toBeCloseTo(540 * 7 / 1920, 10)
   const size = setSurfacePlacementValue(changed, 'scene', 'size', 3)

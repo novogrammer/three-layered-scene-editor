@@ -92,7 +92,7 @@ test.each(['image/png', 'image/jpeg', 'image/webp'])('%s survives base64 chunk b
 test('async export captures settings, pixels and image sources together, without rounding or later edits', async () => {
   const settings = { ...defaultSettings }
   let layer = setFrontRect(initialLayers(settings)[0], { x: 123.1234567890123, y: -27.9876543210987, width: 612.3456789012345, height: 456.7890123456789 })
-  layer = setFrontDepthPx(layer, -1234.1234567890123, true)
+  layer = setFrontDepthPx(layer, -1234.1234567890123, 'screen')
   const before = structuredClone(layer), source = image('保存時.png')
   let release
   const gate = new Promise(resolve => { release = resolve })

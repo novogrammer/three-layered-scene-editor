@@ -24,6 +24,7 @@ export function orientationFor(direction: PlaneDirection): PlaneOrientation {
 }
 export function usesProjection(layer: Layer) { return layer.orientation.relation === 'perpendicular' }
 export function isWall(layer: Layer) { return layer.orientation.direction === 'left' || layer.orientation.direction === 'right' }
+export type PlacementPolicy = 'screen' | 'world'
 export type AlphaMode = 'OPAQUE' | 'BLEND'
 export type Placement =
   | { type: 'screen'; rectPx: Rect; zPx: number }
@@ -202,12 +203,12 @@ export function setFrontRect(layer: Layer, rect: Rect): Layer {
   return result
 }
 
-export function setFrontDepth(layer: Layer, z: number, preserveScreen: boolean) {
+export function setFrontDepth(layer: Layer, z: number, policy: PlacementPolicy) {
   if (layer.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
-  return setFrontDepthPx(layer, z === layer.transform.z ? layer.placement.zPx : z / layerScale(layer), preserveScreen)
+  return setFrontDepthPx(layer, z === layer.transform.z ? layer.placement.zPx : z / layerScale(layer), policy)
 }
 
-export function setFrontDepthPx(layer: Layer, zPx: number, preserveScreen: boolean): Layer {
+export function setFrontDepthPx(layer: Layer, zPx: number, policy: PlacementPolicy): Layer {
   if (layer.placement.type !== 'screen') throw new Error('正面レイヤーを指定してください。')
   assertFinite(zPx)
   const config = configurations.get(layer)!, z = zPx * layerScale(layer)
@@ -215,7 +216,7 @@ export function setFrontDepthPx(layer: Layer, zPx: number, preserveScreen: boole
   const result = cloneLayer(layer)
   if (zPx === layer.placement.zPx) return result
   const p = result.placement as Extract<Placement, { type: 'screen' }>
-  if (!preserveScreen) p.rectPx = frontRect(config, { ...layer.transform, z })
+  if (policy === 'world') p.rectPx = frontRect(config, { ...layer.transform, z })
   p.zPx = zPx
   return result
 }
@@ -315,7 +316,7 @@ export function initialLayers(settings: SceneSettings): Layer[] {
 }
 
 /** Keep existing scene-unit UI behavior while replacing the scene settings atomically. */
-export function reconfigureScene(previous: SceneSettings, next: SceneSettings, layers: Layer[], preserveScreen: boolean): Layer[] {
+export function reconfigureScene(previous: SceneSettings, next: SceneSettings, layers: Layer[], policy: PlacementPolicy): Layer[] {
   const oldMetrics = referenceMetrics(previous), metrics = referenceMetrics(next)
   const ratio = oldMetrics.scale / metrics.scale
   const depthScale = Math.tan(previous.fov * Math.PI / 360) / Math.tan(next.fov * Math.PI / 360)
@@ -328,7 +329,7 @@ export function reconfigureScene(previous: SceneSettings, next: SceneSettings, l
       p.frontZPx *= ratio * depthScale; p.backZPx *= ratio * depthScale
     } else {
       p.zPx *= ratio
-      if (preserveScreen) {
+      if (policy === 'screen') {
         p.rectPx.x *= next.width / previous.width; p.rectPx.width *= next.width / previous.width
         p.rectPx.y *= next.height / previous.height; p.rectPx.height *= next.height / previous.height
       } else if (previous.fov !== next.fov || previous.width !== next.width || previous.height !== next.height

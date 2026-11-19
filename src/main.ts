@@ -10,7 +10,8 @@ import { imageAspectNotice } from './image-aspect'
 import { centeredCover } from './image-fit'
 import { compositionLayers, createLayer, MAX_LAYERS, moveLayer, removeLayer } from './layer-collection'
 import { changeOrientation, defaultSettings, initialLayers, moveOrigin, moveOriginPx, setFrontDepth, setFrontDepthPx, setFrontRect, reconfigureScene, referenceMetrics, isWall, orientationFor, planeDirections, planeRelations, surfacePlacementValues, setSurfacePlacementValue } from './model'
-import type { Layer, PlacementUnit, PlaneDirection, SceneSettings } from './model'
+import type { DiagnosticMode } from './projection'
+import type { Layer, PlacementPolicy, PlacementUnit, PlaneDirection, SceneSettings } from './model'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -22,10 +23,10 @@ let saving = false
 let loading = false
 let exportingGlb = false
 let sceneRevision = 0
-let depthMode = 'screen'
+let depthPolicy: PlacementPolicy = 'screen'
 let alive = true
 const source = get<HTMLCanvasElement>('source')
-interface LayerAsset extends ImageSource { image: HTMLImageElement; texture: THREE.Texture; name: string }
+interface LayerAsset extends ImageSource { image: HTMLImageElement; texture: THREE.Texture }
 let assets = new Map<string, LayerAsset>()
 const imageRequests = new Map<string, symbol>()
 const textureMap = () => new Map([...assets].map(([id, asset]) => [id, asset.texture]))
@@ -44,6 +45,10 @@ function makeTexture(image: HTMLImageElement) {
   texture.generateMipmaps = false
   texture.needsUpdate = true
   return texture
+}
+
+function makeLayerAsset(source: ImageSource & { image: HTMLImageElement }): LayerAsset {
+  return { ...source, texture: makeTexture(source.image) }
 }
 
 function status(message: string, error = false) {
@@ -80,7 +85,7 @@ function fitStages() {
   editor?.requestRender()
 }
 
-function sync(updateEditor = true) {
+function updateSceneView(updateEditor = true) {
   editor.selectedId = selectedId
   if (updateEditor) editor.update(settings, layers, textureMap())
   const metrics = referenceMetrics(settings)
@@ -89,6 +94,28 @@ function sync(updateEditor = true) {
   if (warning) status('カメラに近すぎるPlaneがあります。FOVを狭くするか、Planeを奥へ移動してください。', true)
   compare()
   fitStages()
+}
+
+function renderLayerUI() {
+  renderList()
+  renderPanel()
+}
+
+function refreshScene() {
+  refreshAppearance()
+  renderPanel()
+}
+
+// Keep the current inputs alive while changing visibility, color or material.
+function refreshAppearance() {
+  updateSceneView()
+  renderList()
+}
+
+function refreshSelection() {
+  editor.selectedId = selectedId
+  renderLayerUI()
+  editor.requestRender()
 }
 
 function renderList() {
@@ -109,10 +136,7 @@ function renderList() {
     button.append(dot, name, detail)
     button.onclick = () => {
       selectedId = layer.id
-      editor.selectedId = layer.id
-      renderList()
-      renderPanel()
-      editor.requestRender()
+      refreshSelection()
     }
     list.append(button)
   })
@@ -133,8 +157,7 @@ function numberField(parent: HTMLElement, label: string, value: number, onChange
     if (!input.reportValidity() || !Number.isFinite(input.valueAsNumber)) return
     try {
       onChange(input.valueAsNumber)
-      sync()
-      renderPanel()
+      refreshScene()
     } catch (error) {
       status(error instanceof Error ? error.message : '入力値を確認してください。', true)
       renderPanel()
@@ -170,7 +193,7 @@ function renderPanel() {
     button.disabled = offset === -1 ? index === 0 : index === layers.length - 1
     button.onclick = () => {
       layers = moveLayer(layers, layer.id, offset)
-      sync(); renderList(); renderPanel()
+      refreshScene()
     }
     orderControls.append(button)
   }
@@ -178,7 +201,7 @@ function renderPanel() {
   const change = (direction: PlaneDirection) => {
     try {
       replaceLayer(changeOrientation(settings, layer, orientationFor(direction)))
-      sync(); renderList(); renderPanel()
+      refreshScene()
       status('')
     } catch (error) {
       status(error instanceof Error ? error.message : '面の向きを変更できませんでした。', true)
@@ -210,7 +233,7 @@ function renderPanel() {
   const fileLabel = document.createElement('label'); fileLabel.textContent = '画像'
   const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp'; input.title = 'PNG / JPEG / WebP、32MB以下'
   fileLabel.append(input); panel.append(fileLabel)
-  const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = asset.name
+  const fileInfo = document.createElement('p'); fileInfo.className = 'asset-name'; fileInfo.textContent = `${asset.fileName} / ${asset.image.width} × ${asset.image.height}`
   panel.append(fileInfo)
   const image = asset.image
   const aspectMessage = imageAspectNotice({ width: image.naturalWidth, height: image.naturalHeight }, settings)
@@ -228,17 +251,17 @@ function renderPanel() {
   const visibleLabel = document.createElement('label'); visibleLabel.className = 'inline-check'
   const visible = document.createElement('input'); visible.type = 'checkbox'; visible.checked = layer.visible
   visibleLabel.append(visible, '表示')
-  visible.onchange = () => { layer.visible = visible.checked; renderList(); sync() }
+  visible.onchange = () => { layer.visible = visible.checked; refreshAppearance() }
   const colorLabel = document.createElement('label'); colorLabel.className = 'inline-check'; colorLabel.textContent = '識別色'
   const color = document.createElement('input'); color.type = 'color'; color.value = layer.editorColor
   colorLabel.append(color)
-  color.oninput = () => { layer.editorColor = color.value; renderList(); editor.update(settings, layers) }
+  color.oninput = () => { layer.editorColor = color.value; refreshAppearance() }
   row.append(visibleLabel, colorLabel); panel.append(row)
   const modeLabel = document.createElement('label'); modeLabel.textContent = 'マテリアル'
   const mode = document.createElement('select')
   mode.innerHTML = '<option value="BLEND">透過</option><option value="OPAQUE">不透明</option>'
   mode.value = layer.alphaMode
-  mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; sync() }
+  mode.onchange = () => { layer.alphaMode = mode.value as Layer['alphaMode']; refreshAppearance() }
   modeLabel.append(mode); panel.append(modeLabel)
   const metrics = referenceMetrics(settings)
   const parallel = layer.orientation.relation === 'parallel'
@@ -262,11 +285,11 @@ function renderPanel() {
         const select = document.createElement('select')
         select.innerHTML = '<option value="screen">2D配置を保持</option><option value="world">3D配置を保持</option>'
         select.title = '2D配置の保持は、基準カメラから見た位置とサイズを維持します。'
-        select.value = depthMode; select.onchange = () => { depthMode = select.value }
+        select.value = depthPolicy; select.onchange = () => { depthPolicy = select.value as PlacementPolicy }
         label.append(select); parent.append(label)
       }
       const zInput = numberField(parent, '奥行きZ', px ? layer!.placement.zPx : layer!.transform.z, value => {
-        replaceLayer(px ? setFrontDepthPx(layer!, value, depthMode === 'screen') : setFrontDepth(layer!, value, depthMode === 'screen'))
+        replaceLayer(px ? setFrontDepthPx(layer!, value, depthPolicy) : setFrontDepth(layer!, value, depthPolicy))
       }, -500 * factor, (metrics.cameraZ - metrics.near - 0.001) * factor)
       zInput.setAttribute('aria-label', `奥行きZ ${px ? 'px相当' : 'シーン単位'}`)
       coordinateHint(zInput.parentElement!, '基準面 Z = 0', `reference-z-${unit}`, [zInput])
@@ -355,11 +378,10 @@ async function addImageLayer(file: File) {
     const image = await decodeImage(file)
     if (!alive || revision !== sceneRevision) return
     const layer = createLayer(settings, layers, crypto.randomUUID(), file.name.replace(/\.[^.]+$/, '') || file.name)
-    const texture = makeTexture(image)
-    assets.set(layer.id, { image, texture, blob: file, fileName: file.name, name: `${file.name} / ${image.width} × ${image.height}` })
+    assets.set(layer.id, makeLayerAsset({ image, blob: file, fileName: file.name }))
     layers = [...layers, layer]
     selectedId = layer.id
-    sync(); renderList(); renderPanel()
+    refreshScene()
     status('レイヤーを追加しました。')
   } catch (error) {
     if (alive && revision === sceneRevision) status(error instanceof Error ? error.message : '画像を読み込めませんでした。', true)
@@ -376,9 +398,8 @@ function deleteLayer(id: string) {
   imageRequests.delete(id)
   assets.delete(id)
   // Remove GPU views before releasing the texture they referenced.
-  sync()
+  refreshScene()
   asset?.texture.dispose()
-  renderList(); renderPanel()
   status('')
 }
 
@@ -388,12 +409,10 @@ async function loadImage(file: File, id: string) {
   try {
     const image = await decodeImage(file)
     if (!alive || imageRequests.get(id) !== request || !assets.has(id)) return
-    const texture = makeTexture(image)
     const previous = assets.get(id)!
-    assets.set(id, { image, texture, blob: file, fileName: file.name, name: `${file.name} / ${image.width} × ${image.height}` })
-    sync()
+    assets.set(id, makeLayerAsset({ image, blob: file, fileName: file.name }))
+    refreshScene()
     previous.texture.dispose()
-    if (selectedId === id) renderPanel()
     status('画像を読み込みました。')
   } catch (error) {
     if (alive && imageRequests.get(id) === request && assets.has(id)) {
@@ -414,8 +433,7 @@ async function loadJson(file: File) {
     const prepared = await prepareSceneImport(await file.text(), decodeImage)
     if (!alive) return
     for (const [id, asset] of prepared.assets) {
-      nextAssets.set(id, { ...asset, texture: makeTexture(asset.image),
-        name: `${asset.fileName} / ${asset.image.width} × ${asset.image.height}` })
+      nextAssets.set(id, makeLayerAsset(asset))
     }
     const previous = { settings, layers, assets, selectedId }
     const form = get<HTMLFormElement>('settings-form')
@@ -427,12 +445,12 @@ async function loadJson(file: File) {
           settings = prepared.settings; layers = prepared.layers; assets = nextAssets
           selectedId = layers[0]?.id ?? null
           keys.forEach(key => { (form.elements.namedItem(key) as HTMLInputElement).value = String(settings[key]) })
-          sync(false); renderList(); renderPanel()
+          updateSceneView(false); renderLayerUI()
         })
     } catch (error) {
       settings = previous.settings; layers = previous.layers; assets = previous.assets; selectedId = previous.selectedId
       keys.forEach((key, index) => { (form.elements.namedItem(key) as HTMLInputElement).value = oldInputs[index] })
-      sync(false); renderList(); renderPanel()
+      updateSceneView(false); renderLayerUI()
       throw error
     }
     installed = true
@@ -521,7 +539,7 @@ async function start() {
     if (!alive) return
     layers.forEach((layer, index) => {
       const sample = samples[index]!
-      assets.set(layer.id, { ...sample, texture: makeTexture(sample.image), name: `samples/${sample.fileName}` })
+      assets.set(layer.id, makeLayerAsset(sample))
     })
     editor = new Editor(get('preview'), get('work'), settings, layers, textureMap())
     status('初期化中…')
@@ -546,10 +564,10 @@ async function start() {
       const next = Object.fromEntries(keys.map((key) => [key, Number((form.elements.namedItem(key) as HTMLInputElement).value)])) as unknown as SceneSettings
       try {
         referenceMetrics(next)
-        const screen = get<HTMLSelectElement>('fov-policy').value === 'screen'
-        const updated = reconfigureScene(settings, next, layers, screen)
+        const policy = get<HTMLSelectElement>('fov-policy').value as PlacementPolicy
+        const updated = reconfigureScene(settings, next, layers, policy)
         settings = next; layers = updated
-        sync(); renderPanel()
+        refreshScene()
         status('設定を適用しました。')
       } catch (error) { status(error instanceof Error ? error.message : '設定を適用できません。', true) }
     }
@@ -580,7 +598,7 @@ async function start() {
       editor.requestRender()
     }
     get<HTMLSelectElement>('diagnostic').onchange = (event) => {
-      editor.diagnostic = Number((event.target as HTMLSelectElement).value)
+      editor.diagnostic = (event.target as HTMLSelectElement).value as DiagnosticMode
       editor.requestRender()
     }
     document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
@@ -588,7 +606,7 @@ async function start() {
     })
     stageObserver = new ResizeObserver(fitStages)
     document.querySelectorAll('.image-area').forEach((element) => stageObserver!.observe(element))
-    renderList(); renderPanel(); sync()
+    refreshScene()
     status('')
   } catch (error) {
     if (!alive) return

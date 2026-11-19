@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { surfaceMaterial } from './projection'
+import { diagnosticModes, surfaceMaterial } from './projection'
+import type { DiagnosticMode } from './projection'
 import { referenceMetrics, usesProjection } from './model'
 import { applyLayerTransform } from './layer-transform'
 import { updateProjectedUVs } from './projected-uv'
@@ -50,7 +51,7 @@ export class Editor {
   private settings: SceneSettings
   private layers: Layer[]
   selectedId: string | null = null
-  diagnostic = 1
+  diagnostic: DiagnosticMode = 'bounds'
   surrounding = false
   offsetX = 0
   offsetY = 0
@@ -243,12 +244,12 @@ export class Editor {
     this.helpers.visible = work
     for (const layer of this.layers) {
       const { mesh, outline, originMarker, surface } = this.views.get(layer.id)!
-      const diagnostic = work ? this.diagnostic : 0
-      surface.uniforms.diagnosticMode.value = diagnostic
+      const diagnostic = work ? this.diagnostic : 'image'
+      surface.uniforms.diagnosticMode.value = diagnosticModes[diagnostic]
       outline.visible = work
       originMarker.visible = work
       ;(outline.material as THREE.LineBasicMaterial).opacity = layer.id === this.selectedId ? 1 : 0.35
-      const transparent = diagnostic !== 0 || layer.alphaMode === 'BLEND'
+      const transparent = diagnostic !== 'image' || layer.alphaMode === 'BLEND'
       if (mesh.material.transparent !== transparent) {
         mesh.material.transparent = transparent
         mesh.material.needsUpdate = true

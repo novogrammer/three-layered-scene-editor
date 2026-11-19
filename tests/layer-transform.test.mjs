@@ -69,7 +69,7 @@ test('moving a placement origin preserves the local geometry offset and does not
 
 test('FOV correction leaves the placement origin on z=0 and scales the ground offset', () => {
   const layers = initialLayers(defaultSettings)
-  const updated = reconfigureScene(defaultSettings, { ...defaultSettings, fov: 60 }, layers, true)
+  const updated = reconfigureScene(defaultSettings, { ...defaultSettings, fov: 60 }, layers, 'screen')
   expect(updated[2].origin).toEqual(layers[2].origin)
   expect(updated[2].origin).not.toBe(layers[2].origin)
   const { root } = objects(updated[2])
@@ -94,10 +94,10 @@ test.each(['down', 'left', 'right', 'up'])('%s preserves its projected surface a
   }
   const expected = project(defaultSettings, layer)
   const crossSection = preset === 'left' || preset === 'right' ? 'height' : 'width'
-  for (const preserveScreen of [true, false]) {
+  for (const policy of ['screen', 'world']) {
     for (const fov of [20, 60, 90]) {
       const next = { ...defaultSettings, fov }
-      const [updated] = reconfigureScene(defaultSettings, next, [layer], preserveScreen)
+      const [updated] = reconfigureScene(defaultSettings, next, [layer], policy)
       project(next, updated).forEach((point, i) => {
         expect(point.x).toBeCloseTo(expected[i].x, 10)
         expect(point.y).toBeCloseTo(expected[i].y, 10)
@@ -114,14 +114,14 @@ test.each(['down', 'left', 'right', 'up'])('%s preserves its projected surface a
   let previous = defaultSettings
   for (const fov of [60, 30, 75, 45]) {
     const next = { ...defaultSettings, fov }
-    ;[current] = reconfigureScene(previous, next, [current], true)
+    ;[current] = reconfigureScene(previous, next, [current], 'screen')
     previous = next
   }
   for (const key of Object.keys(layer.transform)) expect(current.transform[key]).toBeCloseTo(layer.transform[key], 10)
   expect(current.depthRange.frontZ).toBeCloseTo(layer.depthRange.frontZ, 10)
   expect(current.depthRange.backZ).toBeCloseTo(layer.depthRange.backZ, 10)
   expect(layer).toEqual(original)
-  const [resolutionOnly] = reconfigureScene(defaultSettings, { ...defaultSettings, width: 3840, height: 2160 }, [layer], true)
+  const [resolutionOnly] = reconfigureScene(defaultSettings, { ...defaultSettings, width: 3840, height: 2160 }, [layer], 'screen')
   expect(resolutionOnly.transform).toEqual(layer.transform)
 })
 

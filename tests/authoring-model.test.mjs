@@ -30,12 +30,12 @@ test('reads and repeated screen-preserving depth/FOV changes never reverse-conve
   for (let i = 0; i < 100; i++) void { ...layer.transform }
   expect(copy(layer)).toEqual(data)
   let current = layer
-  for (const z of [-50, -2, 0, 3, -40]) current = setFrontDepth(current, z, true)
+  for (const z of [-50, -2, 0, 3, -40]) current = setFrontDepth(current, z, 'screen')
   expect(current.placement.rectPx).toEqual(rect)
   let settings = defaultSettings
   for (const fov of [60, 30, 75, 45]) {
     const next = { ...settings, fov }
-    ;[current] = reconfigureScene(settings, next, [current], true)
+    ;[current] = reconfigureScene(settings, next, [current], 'screen')
     expect(current.placement.rectPx).toEqual(rect)
     settings = next
   }
@@ -64,7 +64,7 @@ test('scene-unit setters update only the affected authoring fields', () => {
 test('world-preserving depth changes keep geometry while updating authoring rectangle', () => {
   const layer = initialLayers(defaultSettings)[0], original = copy(layer)
   const t = { ...layer.transform }
-  const moved = setFrontDepth(layer, -20, false)
+  const moved = setFrontDepth(layer, -20, 'world')
   closeTransform(moved.transform, { ...t, z: -20 })
   expect(moved.placement.rectPx).not.toEqual(layer.placement.rectPx)
   expect(copy(layer)).toEqual(original)
@@ -91,12 +91,12 @@ test('height and resolution reconfiguration preserve existing scene-unit behavio
   for (const patch of [{ referenceHeight: 7 }, { width: 1080, height: 1920 }, { width: 3840, height: 2160 },
     { referenceHeight: 8, width: 1080, height: 1920, fov: 60 }]) {
     const next = { ...defaultSettings, ...patch }
-    for (const screen of [true, false]) {
-      const result = reconfigureScene(defaultSettings, next, layers, screen)
+    for (const policy of ['screen', 'world']) {
+      const result = reconfigureScene(defaultSettings, next, layers, policy)
       result.forEach((layer, i) => {
         expect(layer.origin.x).toBeCloseTo(layers[i].origin.x, 10)
         expect(layer.origin.y).toBeCloseTo(layers[i].origin.y, 10)
-        if (i < 2 && !screen) closeTransform(layer.transform, layers[i].transform)
+        if (i < 2 && policy === 'world') closeTransform(layer.transform, layers[i].transform)
       })
       expect(result[2].transform.width).toBeCloseTo(layers[2].transform.width, 10)
     }
@@ -110,7 +110,7 @@ test('invalid scene edits leave authoring data untouched', () => {
     expect(() => { layer.transform[key] = value }).toThrow()
     expect(copy(layer)).toEqual(original)
   }
-  expect(() => setFrontDepth(layer, 100, true)).toThrow()
+  expect(() => setFrontDepth(layer, 100, 'screen')).toThrow()
   expect(copy(layer)).toEqual(original)
 })
 
@@ -119,7 +119,7 @@ test('2D rectangle edits preserve exact pixel inputs, depth and origin, and proj
   const { PerspectiveCamera, Vector3 } = await import('three')
   const rect = { x: -123.1234567890123, y: 57.8765432109876, width: 678.123456789, height: 432.987654321 }
   for (const z of [-40, 0, 2]) {
-    const source = setFrontDepth(initialLayers(defaultSettings)[0], z, true), before = copy(source)
+    const source = setFrontDepth(initialLayers(defaultSettings)[0], z, 'screen'), before = copy(source)
     const layer = setFrontRect(source, rect)
     expect(layer.placement.rectPx).toEqual(rect)
     expect(layer.placement.rectPx).not.toBe(rect)
@@ -153,15 +153,15 @@ test('pixel depth inputs retain their exact value in both screen and world prese
   const { setFrontDepthPx } = await import('../src/model.ts')
   const layer = initialLayers(defaultSettings)[0], before = copy(layer), zPx = -1234.1234567890123
   const scale = referenceMetrics(defaultSettings).scale
-  for (const screen of [true, false]) {
-    const edited = setFrontDepthPx(layer, zPx, screen)
+  for (const policy of ['screen', 'world']) {
+    const edited = setFrontDepthPx(layer, zPx, policy)
     expect(edited.placement.zPx).toBe(zPx)
     expect(edited.originPx).toEqual(layer.originPx)
-    if (screen) expect(edited.placement.rectPx).toEqual(layer.placement.rectPx)
+    if (policy === 'screen') expect(edited.placement.rectPx).toEqual(layer.placement.rectPx)
     else closeTransform(edited.transform, { ...layer.transform, z: zPx * scale })
     expect(edited.transform.z).toBeCloseTo(zPx * scale, 10)
   }
-  expect(() => setFrontDepthPx(layer, 10000, true)).toThrow()
+  expect(() => setFrontDepthPx(layer, 10000, 'screen')).toThrow()
   expect(copy(layer)).toEqual(before)
 })
 
