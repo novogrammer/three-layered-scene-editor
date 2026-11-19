@@ -51,8 +51,9 @@
                 <summary>ヘルプ</summary>
                 <div class="help-content">
                   <h2>座標と配置</h2>
-                  <p>3Dの数値はシーン単位です。配置基準点のZは0。Zの＋方向が手前、−方向が奥です。</p>
-                  <p>基準点を動かすと面も移動します。FOV変更時、垂直な面は両端Zを調整して見え方を保ちます。</p>
+                  <p>基本入力はpx、折りたたみの「3D配置」はシーン単位です。</p>
+                  <p>正面のX・Yは画面左上基準で、Yは下向き。基準点・奥行きなどのpxは、基準面の縮尺による換算値です。</p>
+                  <p>空間の原点は基準面中央。Yは上、Zは手前が＋。配置基準点のZは0です。</p>
                   <h2>視差確認</h2>
                   <p>左右・上下で確認用カメラを移動します。編集データの基準カメラは変わりません。</p>
                   <h2>配置確認</h2>
@@ -66,7 +67,7 @@
             <section class="view-card"><div class="view-heading"><h2>プレビュー</h2><span id="preview-label" hidden>視差確認中</span></div>
               <div class="image-area"><div id="preview-stage" class="image-stage"><canvas id="preview" aria-label="基準カメラと視差確認のプレビュー"></canvas><div id="reference-frame" hidden></div></div></div>
             </section>
-            <section class="view-card"><div class="view-heading"><h2 title="入力画像をZ位置に合わせて奥から手前へ2D合成します。">元画像</h2></div>
+            <section class="view-card"><div class="view-heading"><h2 title="入力画像を中心Zの順に重ねた比較表示です。3D形状の変形は含みません。">2D合成</h2></div>
               <div class="image-area"><div id="source-stage" class="image-stage"><canvas id="source" aria-label="入力レイヤーの2D合成画像"></canvas></div></div>
             </section>
           </div>

@@ -449,6 +449,19 @@ async function loadJson(file: File) {
   }
 }
 
+function downloadFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = url; link.download = filename
+    document.body.append(link)
+    try { link.click() } finally { link.remove() }
+  } finally {
+    // Give the browser time to start reading the download before releasing the URL.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+}
+
 async function saveJson() {
   if (saving) return
   const button = get<HTMLButtonElement>('save-json')
@@ -458,17 +471,8 @@ async function saveJson() {
     const data = await createSceneDocument(settings, layers, assets)
     if (!alive) return
     const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    try {
-      const link = document.createElement('a')
-      link.href = url; link.download = 'three-layered-scene.json'
-      document.body.append(link)
-      try { link.click() } finally { link.remove() }
-      status('JSONを書き出しました。')
-    } finally {
-      // Give the browser time to start reading the download before releasing the URL.
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    }
+    downloadFile(blob, 'three-layered-scene.json')
+    status('JSONを書き出しました。')
   } catch (error) {
     if (alive) status(error instanceof Error ? error.message : 'JSONを保存できませんでした。', true)
   } finally {
@@ -485,13 +489,8 @@ async function exportGlb() {
   try {
     const data = await createSceneGlb(settings, layers, assets)
     if (!alive) return
-    const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }))
-    try {
-      const link = document.createElement('a'); link.href = url; link.download = 'three-layered-scene.glb'
-      document.body.append(link)
-      try { link.click() } finally { link.remove() }
-      status('GLBを書き出しました。')
-    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000) }
+    downloadFile(new Blob([data], { type: 'model/gltf-binary' }), 'three-layered-scene.glb')
+    status('GLBを書き出しました。')
   } catch (error) {
     if (alive) status(error instanceof Error ? error.message : 'GLBを書き出せませんでした。', true)
   } finally {
