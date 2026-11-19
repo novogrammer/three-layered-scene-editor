@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { createLayerModel, defaultSettings, initialLayers, referenceMetrics, setFrontDepth,
-  setDepthRange, moveOrigin, changeOrientation, orientationFor, reconfigureScene } from '../src/model.ts'
+  setSurfacePlacementValue, moveOrigin, changeOrientation, orientationFor, reconfigureScene } from '../src/model.ts'
 
 const copy = layer => structuredClone(layer)
 const closeTransform = (a, b) => {
@@ -73,7 +73,7 @@ test('world-preserving depth changes keep geometry while updating authoring rect
 test.each(['down', 'up', 'left', 'right'])('%s endpoint and origin edits preserve unrelated authoring data', direction => {
   const layer = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(direction))
   const original = copy(layer), scale = referenceMetrics(defaultSettings).scale
-  const moved = setDepthRange(layer, 2, layer.depthRange.backZ)
+  const moved = setSurfacePlacementValue(layer, 'scene', 'frontZ', 2)
   expect(moved.placement.frontZPx).toBe(2 / scale)
   expect(moved.placement.backZPx).toBe(layer.placement.backZPx)
   expect(moved.placement.centerPx).toBe(layer.placement.centerPx)
@@ -110,8 +110,6 @@ test('invalid scene edits leave authoring data untouched', () => {
     expect(() => { layer.transform[key] = value }).toThrow()
     expect(copy(layer)).toEqual(original)
   }
-  expect(() => { layer.transform = { x: 0, y: 0, z: 100, width: 1, height: 1 } }).toThrow()
-  expect(copy(layer)).toEqual(original)
   expect(() => setFrontDepth(layer, 100, true)).toThrow()
   expect(copy(layer)).toEqual(original)
 })

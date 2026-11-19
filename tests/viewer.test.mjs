@@ -7,6 +7,30 @@ import { applyCameraProjection } from '../src/glb-projection.ts'
 import { createSceneGlb } from '../src/scene-glb.ts'
 import { initialLayers, defaultSettings } from '../src/model.ts'
 
+// Observe values passed to Three.js uniforms without exposing them through the consumer API.
+const matrixUniforms = vi.hoisted(() => [])
+vi.mock('three/tsl', async importOriginal => {
+  const actual = await importOriginal()
+  return { ...actual, uniform(value, ...args) {
+    const node = actual.uniform(value, ...args)
+    if (value?.isMatrix4) matrixUniforms.push(node)
+    return node
+  } }
+})
+
+function meshStates(scene) {
+  const result = []
+  scene.traverse(object => { if (object.isMesh) result.push({ mesh: object, original: object.material }) })
+  return result
+}
+function observeProjection(scene) {
+  const start = matrixUniforms.length
+  const projection = applyCameraProjection(scene)
+  const uniforms = matrixUniforms.slice(start)
+  expect(uniforms.length).toBeGreaterThan(0)
+  return { projection, uniforms }
+}
+
 const key = 'threeLayeredScene'
 beforeAll(() => vi.stubGlobal('FileReader', class {
   readAsArrayBuffer(blob) { void blob.arrayBuffer().then(result => { this.result = result; this.onloadend?.() }) }
@@ -58,52 +82,54 @@ test('reusable module depends only on Three.js, without local imports, Loader, D
   expect(source).not.toMatch(/\b(?:document|window|requestAnimationFrame|ResizeObserver|GLTFLoader)\b|import\.meta/)
 })
 
-test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('restores actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
-  const scene = await exportedScene(settings), asset = applyCameraProjection(scene)
+test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('applies actual exported GLB using extras alone, preserving UV and texture identity', async settings => {
+  const scene = await exportedScene(settings), states = meshStates(scene)
+  const { projection, uniforms } = observeProjection(scene)
   try {
-    expect(asset.composition).toEqual({ width: settings.width, height: settings.height })
-    expect(asset.bindings).toHaveLength(3)
-    expect(asset.camera.userData[key].role).toBe('projectionCamera')
-    for (const binding of asset.bindings) {
-      expect(binding.projected.map).toBe(binding.original.map)
-      expect(binding.projected.transparent).toBe(binding.original.transparent)
-      expect(binding.projected.opacity).toBe(binding.original.opacity)
-      expect(binding.projected.side).toBe(binding.original.side)
-      expect(binding.projected.depthWrite).toBe(!binding.original.transparent)
-      expect(binding.projected.toneMapped).toBe(false)
-      const positions = binding.mesh.geometry.getAttribute('position'), uv = binding.mesh.geometry.getAttribute('uv')
-      const sampling = binding.info.sampling
+    expect(projection.composition).toEqual({ width: settings.width, height: settings.height })
+    expect(states).toHaveLength(3)
+    expect(projection.camera.userData[key].role).toBe('projectionCamera')
+    for (const { mesh, original } of states) {
+      expect(mesh.material.isMeshBasicNodeMaterial).toBe(true)
+      expect(mesh.material.map).toBe(original.map)
+      expect(mesh.material.transparent).toBe(original.transparent)
+      expect(mesh.material.opacity).toBe(original.opacity)
+      expect(mesh.material.side).toBe(original.side)
+      expect(mesh.material.depthWrite).toBe(!original.transparent)
+      expect(mesh.material.toneMapped).toBe(false)
+      const positions = mesh.geometry.getAttribute('position'), uv = mesh.geometry.getAttribute('uv')
+      const sampling = mesh.userData[key].sampling
       if (sampling.mode === 'camera') {
         for (let i = 0; i < positions.count; i++) {
-          const point = new Vector3().fromBufferAttribute(positions, i).applyMatrix4(binding.mesh.matrixWorld).applyMatrix4(asset.matrix)
+          const point = new Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld).applyMatrix4(uniforms[0].value)
           const u = (point.x * 0.5 + 0.5) * sampling.imageUvScale[0] + sampling.imageUvOffset[0]
           const v = 1 - ((point.y * 0.5 + 0.5) * sampling.imageUvScale[1] + sampling.imageUvOffset[1])
           expect(u).toBeCloseTo(uv.getX(i), 5); expect(v).toBeCloseTo(uv.getY(i), 5)
         }
       } else expect(sampling).toEqual({ mode: 'uv', texCoord: 0 })
     }
-    const before = asset.camera.matrixWorld.clone()
-    asset.bindings.forEach(binding => expect(binding.mesh.material).toBe(binding.projected))
-    const display = asset.camera.clone(); display.position.x += 10
-    asset.updateProjection()
-    expect(asset.camera.matrixWorld.elements).toEqual(before.elements)
-  } finally { asset.dispose() }
+    const before = projection.camera.matrixWorld.clone()
+    const display = projection.camera.clone(); display.position.x += 10
+    projection.updateProjection()
+    expect(projection.camera.matrixWorld.elements).toEqual(before.elements)
+  } finally { projection.dispose() }
 })
 
-test('projection follows the asset world transform and is independent of display-camera changes', () => {
-  const scene = fixture(), asset = applyCameraProjection(scene)
+test('projection uniforms follow asset transforms independently of display-camera changes', () => {
+  const scene = fixture(), mesh = meshStates(scene)[1].mesh
+  const { projection, uniforms } = observeProjection(scene)
   try {
-    const before = asset.matrix.clone()
-    const mesh = asset.bindings[1].mesh
-    const local = new Vector3(0.12, 0.34, 0)
+    const before = uniforms[0].value.clone(), local = new Vector3(0.12, 0.34, 0)
     const expected = local.clone().applyMatrix4(mesh.matrixWorld).applyMatrix4(before)
     scene.position.set(13, -2, 7); scene.rotation.y = 0.4; scene.scale.setScalar(2)
-    asset.updateProjection()
-    const result = local.clone().applyMatrix4(mesh.matrixWorld).applyMatrix4(asset.matrix)
-    expect(result.x).toBeCloseTo(expected.x, 10); expect(result.y).toBeCloseTo(expected.y, 10)
-    expect(asset.camera.coordinateSystem).toBe(2000)
-    expect(asset.matrix.elements).not.toEqual(new Matrix4().elements)
-  } finally { asset.dispose() }
+    projection.updateProjection()
+    for (const uniform of uniforms) {
+      const result = local.clone().applyMatrix4(mesh.matrixWorld).applyMatrix4(uniform.value)
+      expect(result.x).toBeCloseTo(expected.x, 10); expect(result.y).toBeCloseTo(expected.y, 10)
+      expect(uniform.value.elements).not.toEqual(new Matrix4().elements)
+    }
+    expect(projection.camera.coordinateSystem).toBe(2000)
+  } finally { projection.dispose() }
 })
 
 test.each([
@@ -131,33 +157,33 @@ test.each([
 })
 
 test('disposal restores original materials and leaves borrowed textures alive', () => {
-  const asset = applyCameraProjection(fixture()), disposeTexture = vi.spyOn(asset.bindings[0].original.map, 'dispose')
-  const projectedDisposals = asset.bindings.map(binding => vi.spyOn(binding.projected, 'dispose'))
-  asset.dispose()
-  asset.bindings.forEach(binding => expect(binding.mesh.material).toBe(binding.original))
+  const scene = fixture(), states = meshStates(scene)
+  const disposeTexture = vi.spyOn(states[0].original.map, 'dispose')
+  const projection = applyCameraProjection(scene)
+  const projectedDisposals = states.map(({ mesh }) => vi.spyOn(mesh.material, 'dispose'))
+  projection.dispose()
+  states.forEach(({ mesh, original }) => expect(mesh.material).toBe(original))
   projectedDisposals.forEach(dispose => expect(dispose).toHaveBeenCalledOnce())
   expect(disposeTexture).not.toHaveBeenCalled()
 })
 
 test('borrowed-scene disposal is idempotent and never frees caller-owned resources', () => {
   const scene = fixture(), parent = new Scene(); parent.add(scene)
-  const asset = applyCameraProjection(scene)
-  const mesh = asset.bindings[0].mesh
-  const originalDispose = vi.spyOn(asset.bindings[0].original, 'dispose'), geometryDispose = vi.spyOn(mesh.geometry, 'dispose')
-  const generatedDispose = vi.spyOn(asset.bindings[0].projected, 'dispose')
-  asset.dispose(); asset.dispose()
+  const { mesh, original } = meshStates(scene)[0]
+  const originalDispose = vi.spyOn(original, 'dispose'), geometryDispose = vi.spyOn(mesh.geometry, 'dispose')
+  const projection = applyCameraProjection(scene), generatedDispose = vi.spyOn(mesh.material, 'dispose')
+  projection.dispose(); projection.dispose()
   expect(scene.parent).toBe(parent)
   expect(originalDispose).not.toHaveBeenCalled(); expect(geometryDispose).not.toHaveBeenCalled()
   expect(generatedDispose).toHaveBeenCalledOnce()
 })
 
-
-test('application exposes TSL only and borrows all original GLB resources', () => {
-  const scene = fixture(), asset = applyCameraProjection(scene)
-  expect(asset).not.toHaveProperty('setMode')
-  asset.bindings.forEach(binding => expect(binding.mesh.material).toBe(binding.projected))
-  const textureDispose = vi.spyOn(asset.bindings[0].original.map, 'dispose')
-  asset.dispose()
+test('public API exposes only scene, fixed camera, composition, update and disposal', () => {
+  const scene = fixture(), states = meshStates(scene), projection = applyCameraProjection(scene)
+  expect(Object.keys(projection).sort()).toEqual(['scene', 'camera', 'composition', 'updateProjection', 'dispose'].sort())
+  states.forEach(({ mesh }) => expect(mesh.material.isMeshBasicNodeMaterial).toBe(true))
+  const textureDispose = vi.spyOn(states[0].original.map, 'dispose')
+  projection.dispose()
   expect(textureDispose).not.toHaveBeenCalled()
-  expect(() => asset.updateProjection()).toThrow('解放済み')
+  expect(() => projection.updateProjection()).toThrow('解放済み')
 })

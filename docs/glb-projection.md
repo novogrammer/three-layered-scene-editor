@@ -44,6 +44,8 @@ projection.dispose()
 await renderer.dispose()
 ```
 
+戻り値は`scene`（入力シーン）、`camera`（固定の投影カメラ）、`composition`（共通キャンバス寸法）、`updateProjection()`、`dispose()`。最小例で使う項目だけを公開する。
+
 `projection.dispose()`は元のマテリアルへ戻し、生成したTSLマテリアルだけを解放する。GLTFLoaderで読み込んだシーン・画像・元マテリアル・ジオメトリは呼び出し側が管理・解放する。複数回disposeしてもよいが、解放後はupdateProjectionを呼ばない。
 
 ## 独立ビューアー

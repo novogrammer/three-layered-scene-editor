@@ -4,7 +4,7 @@ import { Texture, Vector3 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { createSceneGlb } from '../src/scene-glb.ts'
 import { readGlb } from '../src/glb-container.ts'
-import { initialLayers, defaultSettings, referenceMetrics, changeOrientation, orientationFor, createLayerModel, setDepthRange } from '../src/model.ts'
+import { initialLayers, defaultSettings, referenceMetrics, changeOrientation, orientationFor, createLayerModel, setSurfacePlacementValue } from '../src/model.ts'
 import { centeredCover } from '../src/image-fit.ts'
 import { GLB_PROJECTION_EXTRAS_KEY as extrasKey } from '../src/glb-projection-extras.ts'
 
@@ -72,7 +72,10 @@ test('demo GLB embeds original files byte for byte with unlit materials, alpha m
 test.each([defaultSettings, { ...defaultSettings, width: 1080, height: 1920, fov: 60 }])('Three.js reads exported geometry and its vertex UVs match the projection and cover', async settings => {
   const initial = initialLayers(settings), layers = [initial[0]]
   for (const direction of ['down', 'up', 'left', 'right']) {
-    const data = structuredClone(setDepthRange(changeOrientation(settings, initial[2], orientationFor(direction)), 0, -28))
+    let surface = changeOrientation(settings, initial[2], orientationFor(direction))
+    surface = setSurfacePlacementValue(surface, 'scene', 'frontZ', 0)
+    surface = setSurfacePlacementValue(surface, 'scene', 'backZ', -28)
+    const data = structuredClone(surface)
     data.id = direction; data.name = direction
     layers.push(createLayerModel(settings, data))
   }

@@ -43,7 +43,7 @@ export interface LayerData {
 export interface Layer extends LayerData {
   readonly origin: PlacementOrigin
   readonly depthRange: Readonly<DepthRange> | null
-  transform: Transform
+  readonly transform: Transform
 }
 
 export const defaultSettings: SceneSettings = { width: 1920, height: 1080, referenceHeight: 5, fov: 45 }
@@ -122,69 +122,34 @@ export function createLayerModel(settings: SceneSettings, data: LayerData): Laye
     origin: { get: () => ({ x: layer.originPx.x * scale, y: layer.originPx.y * scale, z: 0 }) },
     depthRange: { get: () => layer.placement.type === 'surface'
       ? { frontZ: layer.placement.frontZPx * scale, backZ: layer.placement.backZPx * scale } : null },
-    transform: {
-      get: () => transform,
-      set: (value: Transform) => {
-        assertFinite(value.x, value.y, value.z, value.width, value.height)
-        if (value.width <= 0 || value.height <= 0) throw new Error('サイズは正の値にしてください。')
-        if (layer.placement.type === 'screen') {
-          const rect = frontRect(config, value)
-          placeFront(config, rect, value.z)
-          layer.placement = { type: 'screen', rectPx: rect, zPx: value.z / scale }
-        } else {
-          const wall = isWall(layer)
-          const depth = wall ? value.width : value.height
-          layer.originPx[wall ? 'x' : 'y'] = (wall ? value.x : value.y) / scale
-          layer.placement = { type: 'surface', centerPx: (wall ? value.y : value.x) / scale,
-            sizePx: (wall ? value.height : value.width) / scale,
-            frontZPx: (value.z + depth / 2) / scale, backZPx: (value.z - depth / 2) / scale }
-        }
-      },
-    },
+    transform: { get: () => transform },
   })
   configurations.set(layer, config)
   return layer
-}
-
-export function setDepthRange(layer: Layer, frontZ: number, backZ: number): Layer {
-  if (layer.placement.type !== 'surface') throw new Error('正面レイヤーは奥行きZで配置してください。')
-  assertFinite(frontZ, backZ)
-  if (frontZ <= backZ) throw new Error('手前端Zは奥端Zより大きい有限の数値にしてください。')
-  const scale = layerScale(layer)
-  // Clone with the same reference settings, retaining all unrelated authoring values.
-  const result = cloneLayer(layer)
-  const p = result.placement as Extract<Placement, { type: 'surface' }>
-  p.frontZPx = frontZ === layer.depthRange!.frontZ ? p.frontZPx : frontZ / scale
-  p.backZPx = backZ === layer.depthRange!.backZ ? p.backZPx : backZ / scale
-  return result
 }
 
 function layerScale(layer: Layer) { return referenceMetrics(configurations.get(layer)!).scale }
 function cloneLayer(layer: Layer) { return createLayerModel(configurations.get(layer)!, layer) }
 
 export type PlacementUnit = 'px' | 'scene'
-export type SurfaceField = 'center' | 'size' | 'frontZ' | 'backZ' | 'originX' | 'originY'
+export type SurfaceField = 'center' | 'size' | 'frontZ' | 'backZ'
 
 export function surfacePlacementValues(layer: Layer, unit: PlacementUnit): Record<SurfaceField, number> {
   const p = layer.placement
   if (p.type !== 'surface') throw new Error('垂直な面を指定してください。')
   const factor = unit === 'px' ? 1 : layerScale(layer)
   return { center: p.centerPx * factor, size: p.sizePx * factor,
-    frontZ: p.frontZPx * factor, backZ: p.backZPx * factor,
-    originX: layer.originPx.x * factor, originY: layer.originPx.y * factor }
+    frontZ: p.frontZPx * factor, backZ: p.backZPx * factor }
 }
 
-/** Pixel input updates the canonical value directly; switching display units never calls this. */
+/** Update one surface field, converting scene input to canonical pixels only when needed. */
 export function setSurfacePlacementValue(layer: Layer, unit: PlacementUnit, field: SurfaceField, value: number): Layer {
   const values = surfacePlacementValues(layer, unit)
+  if (!Object.hasOwn(values, field)) throw new Error('面の配置項目が不正です。')
   assertFinite(value)
   if (value === values[field]) return cloneLayer(layer)
   const px = unit === 'px' ? value : value / layerScale(layer)
   assertFinite(px)
-  if (field === 'originX' || field === 'originY') {
-    return moveOriginPx(layer, field === 'originX' ? px : layer.originPx.x,
-      field === 'originY' ? px : layer.originPx.y)
-  }
   const result = cloneLayer(layer)
   const p = result.placement as Extract<Placement, { type: 'surface' }>
   if (field === 'center') p.centerPx = px

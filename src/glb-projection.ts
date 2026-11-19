@@ -75,11 +75,9 @@ interface ProjectionBinding {
 
 /** Borrows the source scene. dispose() only restores materials and frees generated TSL materials. */
 export interface CameraProjection {
-  scene: THREE.Object3D
-  camera: THREE.PerspectiveCamera
-  matrix: THREE.Matrix4
-  bindings: ProjectionBinding[]
-  composition: { width: number; height: number }
+  readonly scene: THREE.Object3D
+  readonly camera: THREE.PerspectiveCamera
+  readonly composition: { width: number; height: number }
   updateProjection(): void
   dispose(): void
 }
@@ -134,7 +132,7 @@ export function applyCameraProjection(scene: THREE.Object3D): CameraProjection {
   } catch (error) { bindings.forEach(binding => binding.projected.dispose()); throw error }
   bindings.forEach(binding => { binding.mesh.material = binding.projected })
   return {
-    scene, camera, matrix, bindings,
+    scene, camera,
     composition: { width: composition.width as number, height: composition.height as number },
     updateProjection,
     dispose() {

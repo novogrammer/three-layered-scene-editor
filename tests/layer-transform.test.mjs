@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { Group, Object3D, PerspectiveCamera, Vector3 } from 'three/webgpu'
 import { applyLayerTransform } from '../src/layer-transform.ts'
-import { changeOrientation, orientationFor, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics, setDepthRange } from '../src/model.ts'
+import { changeOrientation, orientationFor, defaultOrigin, defaultSettings, initialLayers, moveOrigin, reconfigureScene, referenceMetrics, setSurfacePlacementValue } from '../src/model.ts'
 
 function closeVector(actual, expected) {
   actual.toArray().forEach((value, i) => expect(value).toBeCloseTo(expected[i], 10))
@@ -79,9 +79,10 @@ test('FOV correction leaves the placement origin on z=0 and scales the ground of
 test.each(['down', 'left', 'right', 'up'])('%s preserves its projected surface and placement origin through FOV changes', (preset) => {
   let layer = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(preset))
   layer = moveOrigin(layer, layer.origin.x + 0.8, layer.origin.y - 0.3)
-  layer.transform = { ...layer.transform, z: -9, width: 11, height: 7 }
-  const depth = preset === 'left' || preset === 'right' ? 11 : 7
-  layer = setDepthRange(layer, -9 + depth / 2, -9 - depth / 2)
+  const wall = preset === 'left' || preset === 'right', depth = wall ? 11 : 7
+  layer = setSurfacePlacementValue(layer, 'scene', 'size', wall ? 7 : 11)
+  layer = setSurfacePlacementValue(layer, 'scene', 'frontZ', -9 + depth / 2)
+  layer = setSurfacePlacementValue(layer, 'scene', 'backZ', -9 - depth / 2)
   const original = structuredClone(layer)
   const project = (settings, surface) => {
     const camera = new PerspectiveCamera(settings.fov, settings.width / settings.height, 0.01, 1000)
@@ -128,7 +129,8 @@ test.each(['down', 'left', 'right', 'up'])('%s derives its geometry from ordered
   const original = changeOrientation(defaultSettings, initialLayers(defaultSettings)[2], orientationFor(preset))
   const before = structuredClone(original)
   for (const [frontZ, backZ] of [[12, -28], [0, -20], [-5, -30], [15, 2]]) {
-    const layer = setDepthRange(original, frontZ, backZ)
+    let layer = setSurfacePlacementValue(original, 'scene', 'frontZ', frontZ)
+    layer = setSurfacePlacementValue(layer, 'scene', 'backZ', backZ)
     const { plane } = objects(layer)
     const corners = [-0.5, 0.5].flatMap(x => [-0.5, 0.5].map(y =>
       new Vector3(x, y, 0).applyMatrix4(plane.matrixWorld)))
@@ -138,7 +140,10 @@ test.each(['down', 'left', 'right', 'up'])('%s derives its geometry from ordered
     expect(layer.origin).toEqual(original.origin)
   }
   for (const [frontZ, backZ] of [[1, 1], [-10, 0], [NaN, -1], [2, -Infinity]]) {
-    expect(() => setDepthRange(original, frontZ, backZ)).toThrow()
+    expect(() => {
+      const layer = setSurfacePlacementValue(original, 'scene', 'frontZ', frontZ)
+      setSurfacePlacementValue(layer, 'scene', 'backZ', backZ)
+    }).toThrow()
   }
   expect(original).toEqual(before)
 })

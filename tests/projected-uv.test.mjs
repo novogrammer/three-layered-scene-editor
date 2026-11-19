@@ -16,7 +16,7 @@ test('parallel-plane vertex UVs match reference projection at vertices and inter
   for (const fov of [20, 45, 90]) {
     const settings = { ...defaultSettings, fov }
     const layer = initialLayers(settings)[0]
-    layer.transform = { ...layer.transform, x: 2.5, y: -1.2, width: 80, height: 30 }
+    Object.assign(layer.transform, { x: 2.5, y: -1.2, width: 80, height: 30 })
     const root = new Group(), plane = new Object3D()
     root.add(plane)
     applyLayerTransform(root, plane, layer)
